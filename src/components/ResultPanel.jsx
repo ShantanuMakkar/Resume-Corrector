@@ -58,6 +58,36 @@ function renderDiffTokens(ops, side) {
   });
 }
 
+// Common Unicode characters that WinAnsi-encoded standard fonts can't draw,
+// mapped to the closest character that font.widthOfTextAtSize can handle.
+const PDF_CHAR_REPLACEMENTS = {
+  "●": "•", // ● -> •
+  "◦": "•", // ◦ -> •
+  "▪": "•", // ▪ -> •
+  "–": "-", // – en dash
+  "—": "-", // — em dash
+  "‘": "'", // ‘
+  "’": "'", // ’
+  "“": '"', // “
+  "”": '"', // ”
+  "…": "...", // …
+};
+
+// Replace characters that the embedded font can't encode so drawText/widthOfTextAtSize don't throw
+function sanitizeForFont(text, font) {
+  let result = "";
+  for (const ch of text) {
+    const mapped = PDF_CHAR_REPLACEMENTS[ch] ?? ch;
+    try {
+      font.widthOfTextAtSize(mapped, 10);
+      result += mapped;
+    } catch {
+      result += "-";
+    }
+  }
+  return result;
+}
+
 // Build a new PDF by replacing text content page by page.
 // Strategy: render original PDF page as a background image (via canvas),
 // then overlay the tailored text blocks on top using pdf-lib.
@@ -112,7 +142,7 @@ async function buildTailoredPDF(originalFile, originalText, tailoredText) {
       const fontSize = Math.abs(item.transform[3]) || 10;
 
       // White out original text
-      const textWidth = item.width || font.widthOfTextAtSize(item.str, fontSize);
+      const textWidth = item.width || font.widthOfTextAtSize(sanitizeForFont(item.str, font), fontSize);
       pdfLibPage.drawRectangle({
         x: x - 1,
         y: y - 2,
@@ -123,7 +153,7 @@ async function buildTailoredPDF(originalFile, originalText, tailoredText) {
       });
 
       // Draw replacement text
-      pdfLibPage.drawText(replacement, {
+      pdfLibPage.drawText(sanitizeForFont(replacement, font), {
         x,
         y,
         size: fontSize,
