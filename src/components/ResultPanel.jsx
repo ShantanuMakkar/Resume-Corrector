@@ -7,16 +7,55 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-// Compute which words changed between original and tailored text
-function diffWords(original, tailored) {
-  const origWords = original.split(/\s+/);
-  const newWords = tailored.split(/\s+/);
-  const changed = new Set();
-  const maxLen = Math.max(origWords.length, newWords.length);
-  for (let i = 0; i < maxLen; i++) {
-    if (origWords[i] !== newWords[i]) changed.add(i);
+// Word-level diff between two lines using LCS, preserving whitespace tokens
+function diffLineWords(origLine, tailLine) {
+  const a = origLine.split(/(\s+)/).filter((t) => t !== "");
+  const b = tailLine.split(/(\s+)/).filter((t) => t !== "");
+  const m = a.length;
+  const n = b.length;
+
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
   }
-  return { origWords, newWords, changed };
+
+  const ops = [];
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) {
+      ops.push({ type: "same", value: a[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      ops.push({ type: "removed", value: a[i] });
+      i++;
+    } else {
+      ops.push({ type: "added", value: b[j] });
+      j++;
+    }
+  }
+  while (i < m) ops.push({ type: "removed", value: a[i++] });
+  while (j < n) ops.push({ type: "added", value: b[j++] });
+
+  return ops;
+}
+
+// Render the tokens for one side of a diffed line, highlighting changed words
+function renderDiffTokens(ops, side) {
+  return ops.map((tok, idx) => {
+    if (side === "original" && tok.type === "added") return null;
+    if (side === "tailored" && tok.type === "removed") return null;
+    if (tok.type === "same") return tok.value;
+    const cls = tok.type === "removed" ? "diff-word-removed" : "diff-word-added";
+    return (
+      <mark key={idx} className={cls}>
+        {tok.value}
+      </mark>
+    );
+  });
 }
 
 // Build a new PDF by replacing text content page by page.
@@ -146,7 +185,8 @@ function computeDiff(original, tailored) {
   for (let i = 0; i < maxLen; i++) {
     const o = origLines[i] ?? "";
     const t = tailLines[i] ?? "";
-    result.push({ original: o, tailored: t, changed: o !== t });
+    const changed = o !== t;
+    result.push({ original: o, tailored: t, changed, ops: changed ? diffLineWords(o, t) : null });
   }
   return result;
 }
@@ -232,8 +272,12 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
           {diff.map((line, i) =>
             line.changed ? (
               <div key={i} className="diff-block">
-                <div className="diff-line diff-removed">{line.original || <em>—</em>}</div>
-                <div className="diff-line diff-added">{line.tailored || <em>—</em>}</div>
+                <div className="diff-line diff-removed">
+                  {line.original ? renderDiffTokens(line.ops, "original") : <em>—</em>}
+                </div>
+                <div className="diff-line diff-added">
+                  {line.tailored ? renderDiffTokens(line.ops, "tailored") : <em>—</em>}
+                </div>
               </div>
             ) : null
           )}

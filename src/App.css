@@ -423,6 +423,19 @@ body {
   color: #7fe8ab;
 }
 
+.diff-word-removed {
+  background: rgba(255, 94, 94, 0.35);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.diff-word-added {
+  background: rgba(70, 220, 140, 0.35);
+  border-radius: 3px;
+  padding: 0 2px;
+  text-decoration: none;
+}
+
 .no-changes {
   color: var(--text-muted);
   font-size: 13px;
