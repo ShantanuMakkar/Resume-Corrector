@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
+import { groupItemsIntoLines } from "../lib/pdfLines";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -88,9 +89,9 @@ function sanitizeForFont(text, font) {
   return result;
 }
 
-// Build a new PDF by replacing text content page by page.
-// Strategy: render original PDF page as a background image (via canvas),
-// then overlay the tailored text blocks on top using pdf-lib.
+// Build a new PDF by replacing changed lines in place.
+// For each visual line, white out its bounding box and redraw the tailored
+// text scaled to fit within the original line's width.
 async function buildTailoredPDF(originalFile, originalText, tailoredText) {
   const arrayBuffer = await originalFile.arrayBuffer();
 
@@ -99,111 +100,66 @@ async function buildTailoredPDF(originalFile, originalText, tailoredText) {
   const pdfLibDoc = await PDFDocument.load(arrayBuffer);
   const pages = pdfLibDoc.getPages();
 
-  // Embed a monospace font for fallback overlays
   const font = await pdfLibDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfLibDoc.embedFont(StandardFonts.HelveticaBold);
 
-  // Flatten tailored text into tokens for sequential replacement
-  const tailoredLines = tailoredText.split("\n");
-  const originalLines = originalText.split("\n");
+  const normalize = (line) => line.replace(/\s+/g, " ").trim();
+  const originalLines = originalText.split("\n").map(normalize).filter(Boolean);
+  const tailoredLines = tailoredText.split("\n").map(normalize).filter(Boolean);
 
-  // Build a word-level diff map
-  const origFlat = originalText.replace(/\s+/g, " ").trim();
-  const tailFlat = tailoredText.replace(/\s+/g, " ").trim();
-  const origTokens = origFlat.split(" ");
-  const tailTokens = tailFlat.split(" ");
+  // Map each original line to its tailored counterpart by position
+  const replacements = new Map();
+  const maxLines = Math.max(originalLines.length, tailoredLines.length);
+  for (let i = 0; i < maxLines; i++) {
+    const orig = originalLines[i];
+    const tail = tailoredLines[i];
+    if (orig && tail && orig !== tail) {
+      replacements.set(orig, tail);
+    }
+  }
 
-  // Create a replacement map: original phrase → tailored phrase
-  // We do sentence-level matching to find what changed
-  const replacements = buildReplacementMap(originalLines, tailoredLines);
-
-  // For each page, find text items and apply replacements
   for (let pageIdx = 0; pageIdx < pdfjsDoc.numPages; pageIdx++) {
     const pdfjsPage = await pdfjsDoc.getPage(pageIdx + 1);
-    const viewport = pdfjsPage.getViewport({ scale: 1.0 });
     const textContent = await pdfjsPage.getTextContent();
     const pdfLibPage = pages[pageIdx];
-    const { height: pageHeight } = pdfLibPage.getSize();
 
-    for (const item of textContent.items) {
-      if (!item.str || item.str.trim() === "") continue;
+    const lines = groupItemsIntoLines(textContent.items);
 
-      const replacement = findReplacement(item.str, replacements);
+    for (const line of lines) {
+      if (!line.text) continue;
+      const replacement = replacements.get(line.text);
       if (!replacement) continue;
 
-      // Convert pdfjs coordinates (bottom-left origin) to pdf-lib coords
-      const tx = item.transform[4];
-      const ty = item.transform[5];
-      // pdfjs viewport is top-left, pdf-lib is bottom-left
-      const x = tx;
-      const y = pageHeight - viewport.height + ty;
+      const width = line.xEnd - line.x;
 
-      // Approximate font size from transform matrix
-      const fontSize = Math.abs(item.transform[3]) || 10;
-
-      // White out original text
-      const textWidth = item.width || font.widthOfTextAtSize(sanitizeForFont(item.str, font), fontSize);
+      // White out the original line
       pdfLibPage.drawRectangle({
-        x: x - 1,
-        y: y - 2,
-        width: textWidth + 2,
-        height: fontSize + 3,
+        x: line.x - 1,
+        y: line.y - line.height * 0.25,
+        width: width + 4,
+        height: line.height * 1.3,
         color: rgb(1, 1, 1),
-        opacity: 1,
       });
 
-      // Draw replacement text
-      pdfLibPage.drawText(sanitizeForFont(replacement, font), {
-        x,
-        y,
+      // Shrink the font if needed so the replacement fits the original width
+      const safeText = sanitizeForFont(replacement, font);
+      let fontSize = line.height;
+      const naturalWidth = font.widthOfTextAtSize(safeText, fontSize);
+      if (naturalWidth > width && naturalWidth > 0) {
+        fontSize = Math.max(6, fontSize * (width / naturalWidth));
+      }
+
+      pdfLibPage.drawText(safeText, {
+        x: line.x,
+        y: line.y,
         size: fontSize,
         font,
         color: rgb(0, 0, 0),
-        maxWidth: textWidth + 20,
       });
     }
   }
 
   const pdfBytes = await pdfLibDoc.save();
   return pdfBytes;
-}
-
-function buildReplacementMap(originalLines, tailoredLines) {
-  const map = new Map();
-  const maxLines = Math.max(originalLines.length, tailoredLines.length);
-
-  for (let i = 0; i < maxLines; i++) {
-    const orig = (originalLines[i] || "").trim();
-    const tail = (tailoredLines[i] || "").trim();
-    if (orig && tail && orig !== tail) {
-      // Find sub-phrase differences within the line
-      const origPhrases = orig.split(/[,;]/);
-      const tailPhrases = tail.split(/[,;]/);
-      origPhrases.forEach((phrase, j) => {
-        const origP = phrase.trim();
-        const tailP = (tailPhrases[j] || "").trim();
-        if (origP && tailP && origP !== tailP) {
-          map.set(origP, tailP);
-        }
-      });
-      // Also map the whole line
-      map.set(orig, tail);
-    }
-  }
-  return map;
-}
-
-function findReplacement(str, map) {
-  const trimmed = str.trim();
-  if (map.has(trimmed)) return map.get(trimmed);
-  // Partial match: check if the text is a key substring
-  for (const [orig, repl] of map.entries()) {
-    if (orig.includes(trimmed) && orig.length < trimmed.length * 2) {
-      // Extract the corresponding part from replacement
-      return repl;
-    }
-  }
-  return null;
 }
 
 // Highlight changed lines for the diff view

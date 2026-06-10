@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
+import { groupItemsIntoLines } from "../lib/pdfLines";
 
 // Use local worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -15,8 +16,8 @@ async function extractTextFromPDF(file) {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items.map((item) => item.str).join(" ");
-    fullText += pageText + "\n\n";
+    const lines = groupItemsIntoLines(content.items);
+    fullText += lines.map((line) => line.text).join("\n") + "\n\n";
   }
 
   return fullText.trim();
