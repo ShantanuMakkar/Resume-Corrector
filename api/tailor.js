@@ -1,6 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const client = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
 export const config = { maxDuration: 60 };
 
@@ -41,14 +41,13 @@ ${jd}
 
 Return the tailored resume text. Make only the minimal necessary changes. Preserve all formatting structure (line breaks, bullet points, section headers) exactly as-is.`;
 
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4000,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
+    const model = client.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      systemInstruction: systemPrompt,
     });
 
-    const tailoredText = response.content[0].text;
+    const response = await model.generateContent(userPrompt);
+    const tailoredText = response.response.text();
 
     return res.status(200).json({ tailoredText });
   } catch (err) {
