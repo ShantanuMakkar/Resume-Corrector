@@ -1,144 +1,80 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
-import fontkit from "@pdf-lib/fontkit";
 import * as pdfjsLib from "pdfjs-dist";
 import { groupItemsIntoLines } from "../lib/pdfLines";
-import { extractEmbeddedFontBytes } from "../lib/pdfFonts";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url
 ).toString();
 
-// Word-level diff between two lines using LCS, preserving whitespace tokens
+// Characters that standard WinAnsi fonts can't handle — map to safe equivalents
+const CHAR_MAP = {
+  "●": "•", "◦": "•", "▪": "•",
+  "–": "-", "—": "-",
+  "'": "'", "'": "'",
+  "\u201C": '"', "\u201D": '"',
+  "…": "...",
+};
+
+function sanitize(text) {
+  return [...text].map((ch) => CHAR_MAP[ch] ?? ch).join("");
+}
+
+// Word-level diff between two lines using LCS
 function diffLineWords(origLine, tailLine) {
   const a = origLine.split(/(\s+)/).filter((t) => t !== "");
   const b = tailLine.split(/(\s+)/).filter((t) => t !== "");
   const m = a.length;
   const n = b.length;
-
   const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = m - 1; i >= 0; i--) {
-    for (let j = n - 1; j >= 0; j--) {
-      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    }
-  }
-
+  for (let i = m - 1; i >= 0; i--)
+    for (let j = n - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i+1][j+1]+1 : Math.max(dp[i+1][j], dp[i][j+1]);
   const ops = [];
-  let i = 0;
-  let j = 0;
+  let i = 0, j = 0;
   while (i < m && j < n) {
-    if (a[i] === b[j]) {
-      ops.push({ type: "same", value: a[i] });
-      i++;
-      j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      ops.push({ type: "removed", value: a[i] });
-      i++;
-    } else {
-      ops.push({ type: "added", value: b[j] });
-      j++;
-    }
+    if (a[i] === b[j]) { ops.push({ type: "same", value: a[i] }); i++; j++; }
+    else if (dp[i+1][j] >= dp[i][j+1]) { ops.push({ type: "removed", value: a[i] }); i++; }
+    else { ops.push({ type: "added", value: b[j] }); j++; }
   }
   while (i < m) ops.push({ type: "removed", value: a[i++] });
   while (j < n) ops.push({ type: "added", value: b[j++] });
-
   return ops;
 }
 
-// Render the tokens for one side of a diffed line, highlighting changed words
 function renderDiffTokens(ops, side) {
   return ops.map((tok, idx) => {
     if (side === "original" && tok.type === "added") return null;
     if (side === "tailored" && tok.type === "removed") return null;
     if (tok.type === "same") return tok.value;
     const cls = tok.type === "removed" ? "diff-word-removed" : "diff-word-added";
-    return (
-      <mark key={idx} className={cls}>
-        {tok.value}
-      </mark>
-    );
+    return <mark key={idx} className={cls}>{tok.value}</mark>;
   });
 }
 
-// Common Unicode characters that WinAnsi-encoded standard fonts can't draw,
-// mapped to the closest character that font.widthOfTextAtSize can handle.
-const PDF_CHAR_REPLACEMENTS = {
-  "●": "•", // ● -> •
-  "◦": "•", // ◦ -> •
-  "▪": "•", // ▪ -> •
-  "–": "-", // – en dash
-  "—": "-", // — em dash
-  "‘": "'", // ‘
-  "’": "'", // ’
-  "“": '"', // “
-  "”": '"', // ”
-  "…": "...", // …
-};
-
-// Replace characters that the embedded font can't encode so drawText/widthOfTextAtSize don't throw
-function sanitizeForFont(text, font) {
-  let result = "";
-  for (const ch of text) {
-    const mapped = PDF_CHAR_REPLACEMENTS[ch] ?? ch;
-    try {
-      font.widthOfTextAtSize(mapped, 10);
-      result += mapped;
-    } catch {
-      result += "-";
-    }
-  }
-  return result;
+// Detect if a pdfjs text item is bold by inspecting its fontName
+function isBoldItem(item) {
+  const fn = (item.fontName || "").toLowerCase();
+  return fn.includes("bold") || fn.includes("heavy") || fn.includes("black");
 }
 
-// Whether a font can render every character of the text (after applying our
-// known character substitutions)
-function canEncode(font, text) {
-  for (const ch of text) {
-    const mapped = PDF_CHAR_REPLACEMENTS[ch] ?? ch;
-    try {
-      font.widthOfTextAtSize(mapped, 10);
-    } catch {
-      return false;
-    }
-  }
-  return true;
-}
-
-// Build a new PDF by replacing changed lines in place.
-// For each visual line, white out its bounding box and redraw the tailored
-// text scaled to fit within the original line's width.
 async function buildTailoredPDF(originalFile, originalText, tailoredText) {
   const arrayBuffer = await originalFile.arrayBuffer();
 
-  // Load with pdfjs to get per-page text items with positions
   const pdfjsDoc = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
   const pdfLibDoc = await PDFDocument.load(arrayBuffer);
-  pdfLibDoc.registerFontkit(fontkit);
   const pages = pdfLibDoc.getPages();
 
-  const fallbackFont = await pdfLibDoc.embedFont(StandardFonts.Helvetica);
-
-  // Try to reuse the resume's own embedded fonts so replacement text matches
-  // the original style. Fall back to Helvetica for any font that fails to
-  // embed or can't encode a given line's characters.
-  const candidateFonts = [];
-  for (const bytes of extractEmbeddedFontBytes(pdfLibDoc)) {
-    try {
-      candidateFonts.push(await pdfLibDoc.embedFont(bytes, { subset: true }));
-    } catch {
-      // pdf-lib/fontkit couldn't parse this font program — skip it
-    }
-  }
-  candidateFonts.push(fallbackFont);
-
-  const pickFont = (text) => candidateFonts.find((f) => canEncode(f, text)) ?? fallbackFont;
+  // Embed only standard fonts — 100% reliable, no font corruption
+  const fontRegular = await pdfLibDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfLibDoc.embedFont(StandardFonts.HelveticaBold);
 
   const normalize = (line) => line.replace(/\s+/g, " ").trim();
   const originalLines = originalText.split("\n").map(normalize).filter(Boolean);
   const tailoredLines = tailoredText.split("\n").map(normalize).filter(Boolean);
 
-  // Map each original line to its tailored counterpart by position
+  // Map original line → tailored line (positional, line-by-line)
   const replacements = new Map();
   const maxLines = Math.max(originalLines.length, tailoredLines.length);
   for (let i = 0; i < maxLines; i++) {
@@ -156,64 +92,71 @@ async function buildTailoredPDF(originalFile, originalText, tailoredText) {
 
     const lines = groupItemsIntoLines(textContent.items);
 
+    // Build a boldness map: line text → is bold (based on first item's font)
+    const lineBoldMap = new Map();
     for (const line of lines) {
-      if (!line.text) continue;
+      if (line.items && line.items.length > 0) {
+        // groupItemsIntoLines doesn't preserve items on the returned object,
+        // so we detect bold from the raw items by matching y position
+        const firstRawItem = textContent.items.find(
+          (it) => Math.abs(it.transform[5] - line.y) < line.height * 0.4
+        );
+        lineBoldMap.set(line.text, firstRawItem ? isBoldItem(firstRawItem) : false);
+      }
+    }
+
+    for (const line of lines) {
       const replacement = replacements.get(line.text);
       if (!replacement) continue;
 
-      const width = line.xEnd - line.x;
+      const lineWidth = line.xEnd - line.x;
+      const isBold = lineBoldMap.get(line.text) ?? false;
+      const font = isBold ? fontBold : fontRegular;
+      const safeText = sanitize(replacement);
 
-      // White out the original line
+      // White out original line with a slight vertical padding
       pdfLibPage.drawRectangle({
         x: line.x - 1,
-        y: line.y - line.height * 0.25,
-        width: width + 4,
-        height: line.height * 1.3,
+        y: line.y - line.height * 0.3,
+        width: lineWidth + 4,
+        height: line.height * 1.5,
         color: rgb(1, 1, 1),
       });
 
-      // Pick a font that can render this line, preferring the resume's own fonts
-      const lineFont = pickFont(replacement);
-      const safeText = sanitizeForFont(replacement, lineFont);
-
-      // Shrink the font if needed so the replacement fits the original width
-      let fontSize = line.height;
-      const naturalWidth = lineFont.widthOfTextAtSize(safeText, fontSize);
-      if (naturalWidth > width && naturalWidth > 0) {
-        fontSize = Math.max(6, fontSize * (width / naturalWidth));
+      // Scale font down if replacement text is longer than available width
+      let fontSize = line.height * 0.95;
+      const naturalWidth = font.widthOfTextAtSize(safeText, fontSize);
+      if (naturalWidth > lineWidth && naturalWidth > 0) {
+        fontSize = Math.max(6, fontSize * (lineWidth / naturalWidth));
       }
 
       pdfLibPage.drawText(safeText, {
         x: line.x,
         y: line.y,
         size: fontSize,
-        font: lineFont,
+        font,
         color: rgb(0, 0, 0),
       });
     }
   }
 
-  const pdfBytes = await pdfLibDoc.save();
-  return pdfBytes;
+  return await pdfLibDoc.save();
 }
 
-// Highlight changed lines for the diff view
 function computeDiff(original, tailored) {
   const origLines = original.split("\n");
   const tailLines = tailored.split("\n");
-  const result = [];
   const maxLen = Math.max(origLines.length, tailLines.length);
-  for (let i = 0; i < maxLen; i++) {
+  return Array.from({ length: maxLen }, (_, i) => {
     const o = origLines[i] ?? "";
     const t = tailLines[i] ?? "";
     const changed = o !== t;
-    result.push({ original: o, tailored: t, changed, ops: changed ? diffLineWords(o, t) : null });
-  }
-  return result;
+    return { original: o, tailored: t, changed, ops: changed ? diffLineWords(o, t) : null };
+  });
 }
 
 export default function ResultPanel({ originalText, tailoredText, originalFile, onReset }) {
-  const [view, setView] = useState("diff"); // diff | tailored
+  const [view, setView] = useState("diff");
   const [building, setBuilding] = useState(false);
   const [pdfUrl, setPdfUrl] = useState(null);
 
@@ -221,10 +164,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
   const changedCount = diff.filter((l) => l.changed && l.tailored.trim()).length;
 
   async function handleDownload() {
-    if (pdfUrl) {
-      triggerDownload(pdfUrl);
-      return;
-    }
+    if (pdfUrl) { triggerDownload(pdfUrl); return; }
     setBuilding(true);
     try {
       const pdfBytes = await buildTailoredPDF(originalFile, originalText, tailoredText);
@@ -234,7 +174,6 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
       triggerDownload(url);
     } catch (err) {
       console.error("PDF build error:", err);
-      // Fallback: download as txt
       const blob = new Blob([tailoredText], { type: "text/plain" });
       triggerDownload(URL.createObjectURL(blob), "tailored-resume.txt");
     } finally {
@@ -259,33 +198,15 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
         </div>
         <div className="result-actions">
           <button className="btn-ghost" onClick={onReset}>← New resume</button>
-          <button
-            className="btn-download"
-            onClick={handleDownload}
-            disabled={building}
-          >
-            {building ? (
-              <><span className="spinner spinner-sm" /> Building PDF…</>
-            ) : (
-              "↓ Download PDF"
-            )}
+          <button className="btn-download" onClick={handleDownload} disabled={building}>
+            {building ? <><span className="spinner spinner-sm" /> Building PDF…</> : "↓ Download PDF"}
           </button>
         </div>
       </div>
 
       <div className="tab-bar">
-        <button
-          className={`tab ${view === "diff" ? "tab-active" : ""}`}
-          onClick={() => setView("diff")}
-        >
-          Changes
-        </button>
-        <button
-          className={`tab ${view === "tailored" ? "tab-active" : ""}`}
-          onClick={() => setView("tailored")}
-        >
-          Full text
-        </button>
+        <button className={`tab ${view === "diff" ? "tab-active" : ""}`} onClick={() => setView("diff")}>Changes</button>
+        <button className={`tab ${view === "tailored" ? "tab-active" : ""}`} onClick={() => setView("tailored")}>Full text</button>
       </div>
 
       {view === "diff" ? (
