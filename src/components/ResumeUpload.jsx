@@ -1,26 +1,10 @@
 import { useRef, useState } from "react";
-import * as pdfjsLib from "pdfjs-dist";
-import { groupItemsIntoLines } from "../lib/pdfLines";
 
-// Use local worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
-).toString();
-
-async function extractTextFromPDF(file) {
+async function extractTextFromDocx(file) {
+  const mammoth = await import("mammoth");
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let fullText = "";
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const lines = groupItemsIntoLines(content.items);
-    fullText += lines.map((line) => line.text).join("\n") + "\n\n";
-  }
-
-  return fullText.trim();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value.trim();
 }
 
 export default function ResumeUpload({ file, onFile }) {
@@ -29,22 +13,27 @@ export default function ResumeUpload({ file, onFile }) {
   const [parseError, setParseError] = useState("");
   const [dragOver, setDragOver] = useState(false);
 
+  const ACCEPTED = [
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+  ];
+
   async function processFile(f) {
-    if (!f || f.type !== "application/pdf") {
-      setParseError("Please upload a PDF file.");
+    if (!f || !ACCEPTED.includes(f.type)) {
+      setParseError("Please upload a .docx or .doc file.");
       return;
     }
     setParsing(true);
     setParseError("");
     try {
-      const text = await extractTextFromPDF(f);
+      const text = await extractTextFromDocx(f);
       if (!text || text.length < 100) {
-        setParseError("Couldn't extract text. The PDF may be image-based or scanned.");
+        setParseError("Couldn't extract text from the document.");
         return;
       }
       onFile(f, text);
     } catch (err) {
-      setParseError("Failed to parse PDF: " + err.message);
+      setParseError("Failed to read document: " + err.message);
     } finally {
       setParsing(false);
     }
@@ -97,10 +86,7 @@ export default function ResumeUpload({ file, onFile }) {
           onDrop={handleDrop}
         >
           {parsing ? (
-            <>
-              <span className="spinner" />
-              <span>Reading PDF…</span>
-            </>
+            <><span className="spinner" /><span>Reading document…</span></>
           ) : (
             <>
               <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
@@ -108,8 +94,8 @@ export default function ResumeUpload({ file, onFile }) {
                 <path d="M5 24h22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.4" />
                 <path d="M5 28h22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.2" />
               </svg>
-              <span>Drop PDF here or click to browse</span>
-              <span className="drop-hint">PDF only · Text-based resumes work best</span>
+              <span>Drop your resume here or click to browse</span>
+              <span className="drop-hint">.docx or .doc · Formatting is preserved</span>
             </>
           )}
         </div>
@@ -118,7 +104,7 @@ export default function ResumeUpload({ file, onFile }) {
       <input
         ref={inputRef}
         type="file"
-        accept="application/pdf"
+        accept=".docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
         style={{ display: "none" }}
         onChange={handleChange}
       />

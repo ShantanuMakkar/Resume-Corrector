@@ -1,32 +1,10 @@
 import { useState } from "react";
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
-import * as pdfjsLib from "pdfjs-dist";
-import { groupItemsIntoLines } from "../lib/pdfLines";
+import { injectTextIntoDocx } from "../lib/docxProcessor";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
-).toString();
-
-// Characters that standard WinAnsi fonts can't handle — map to safe equivalents
-const CHAR_MAP = {
-  "●": "•", "◦": "•", "▪": "•",
-  "–": "-", "—": "-",
-  "'": "'", "'": "'",
-  "\u201C": '"', "\u201D": '"',
-  "…": "...",
-};
-
-function sanitize(text) {
-  return [...text].map((ch) => CHAR_MAP[ch] ?? ch).join("");
-}
-
-// Word-level diff between two lines using LCS
 function diffLineWords(origLine, tailLine) {
   const a = origLine.split(/(\s+)/).filter((t) => t !== "");
   const b = tailLine.split(/(\s+)/).filter((t) => t !== "");
-  const m = a.length;
-  const n = b.length;
+  const m = a.length, n = b.length;
   const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
   for (let i = m - 1; i >= 0; i--)
     for (let j = n - 1; j >= 0; j--)
@@ -53,96 +31,6 @@ function renderDiffTokens(ops, side) {
   });
 }
 
-// Detect if a pdfjs text item is bold by inspecting its fontName
-function isBoldItem(item) {
-  const fn = (item.fontName || "").toLowerCase();
-  return fn.includes("bold") || fn.includes("heavy") || fn.includes("black");
-}
-
-async function buildTailoredPDF(originalFile, originalText, tailoredText) {
-  const arrayBuffer = await originalFile.arrayBuffer();
-
-  const pdfjsDoc = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
-  const pdfLibDoc = await PDFDocument.load(arrayBuffer);
-  const pages = pdfLibDoc.getPages();
-
-  // Embed only standard fonts — 100% reliable, no font corruption
-  const fontRegular = await pdfLibDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfLibDoc.embedFont(StandardFonts.HelveticaBold);
-
-  const normalize = (line) => line.replace(/\s+/g, " ").trim();
-  const originalLines = originalText.split("\n").map(normalize).filter(Boolean);
-  const tailoredLines = tailoredText.split("\n").map(normalize).filter(Boolean);
-
-  // Map original line → tailored line (positional, line-by-line)
-  const replacements = new Map();
-  const maxLines = Math.max(originalLines.length, tailoredLines.length);
-  for (let i = 0; i < maxLines; i++) {
-    const orig = originalLines[i];
-    const tail = tailoredLines[i];
-    if (orig && tail && orig !== tail) {
-      replacements.set(orig, tail);
-    }
-  }
-
-  for (let pageIdx = 0; pageIdx < pdfjsDoc.numPages; pageIdx++) {
-    const pdfjsPage = await pdfjsDoc.getPage(pageIdx + 1);
-    const textContent = await pdfjsPage.getTextContent();
-    const pdfLibPage = pages[pageIdx];
-
-    const lines = groupItemsIntoLines(textContent.items);
-
-    // Build a boldness map: line text → is bold (based on first item's font)
-    const lineBoldMap = new Map();
-    for (const line of lines) {
-      if (line.items && line.items.length > 0) {
-        // groupItemsIntoLines doesn't preserve items on the returned object,
-        // so we detect bold from the raw items by matching y position
-        const firstRawItem = textContent.items.find(
-          (it) => Math.abs(it.transform[5] - line.y) < line.height * 0.4
-        );
-        lineBoldMap.set(line.text, firstRawItem ? isBoldItem(firstRawItem) : false);
-      }
-    }
-
-    for (const line of lines) {
-      const replacement = replacements.get(line.text);
-      if (!replacement) continue;
-
-      const lineWidth = line.xEnd - line.x;
-      const isBold = lineBoldMap.get(line.text) ?? false;
-      const font = isBold ? fontBold : fontRegular;
-      const safeText = sanitize(replacement);
-
-      // White out original line with a slight vertical padding
-      pdfLibPage.drawRectangle({
-        x: line.x - 1,
-        y: line.y - line.height * 0.3,
-        width: lineWidth + 4,
-        height: line.height * 1.5,
-        color: rgb(1, 1, 1),
-      });
-
-      // Scale font down if replacement text is longer than available width
-      let fontSize = line.height * 0.95;
-      const naturalWidth = font.widthOfTextAtSize(safeText, fontSize);
-      if (naturalWidth > lineWidth && naturalWidth > 0) {
-        fontSize = Math.max(6, fontSize * (lineWidth / naturalWidth));
-      }
-
-      pdfLibPage.drawText(safeText, {
-        x: line.x,
-        y: line.y,
-        size: fontSize,
-        font,
-        color: rgb(0, 0, 0),
-      });
-    }
-  }
-
-  return await pdfLibDoc.save();
-}
-
 function computeDiff(original, tailored) {
   const origLines = original.split("\n");
   const tailLines = tailored.split("\n");
@@ -150,7 +38,7 @@ function computeDiff(original, tailored) {
   return Array.from({ length: maxLen }, (_, i) => {
     const o = origLines[i] ?? "";
     const t = tailLines[i] ?? "";
-    const changed = o !== t;
+    const changed = o.trim() !== t.trim();
     return { original: o, tailored: t, changed, ops: changed ? diffLineWords(o, t) : null };
   });
 }
@@ -158,31 +46,51 @@ function computeDiff(original, tailored) {
 export default function ResultPanel({ originalText, tailoredText, originalFile, onReset }) {
   const [view, setView] = useState("diff");
   const [building, setBuilding] = useState(false);
-  const [pdfUrl, setPdfUrl] = useState(null);
+  const [docxUrl, setDocxUrl] = useState(null);
+  const [buildError, setBuildError] = useState("");
 
   const diff = computeDiff(originalText, tailoredText);
   const changedCount = diff.filter((l) => l.changed && l.tailored.trim()).length;
 
-  async function handleDownload() {
-    if (pdfUrl) { triggerDownload(pdfUrl); return; }
+  async function buildDocx() {
+    if (docxUrl) return docxUrl;
     setBuilding(true);
+    setBuildError("");
     try {
-      const pdfBytes = await buildTailoredPDF(originalFile, originalText, tailoredText);
-      const blob = new Blob([pdfBytes], { type: "application/pdf" });
+      const docxBuffer = await injectTextIntoDocx(originalFile, originalText, tailoredText);
+      const blob = new Blob([docxBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
       const url = URL.createObjectURL(blob);
-      setPdfUrl(url);
-      triggerDownload(url);
+      setDocxUrl(url);
+      return url;
     } catch (err) {
-      console.error("PDF build error:", err);
-      const blob = new Blob([tailoredText], { type: "text/plain" });
-      triggerDownload(URL.createObjectURL(blob), "tailored-resume.txt");
+      console.error("Docx build error:", err);
+      setBuildError("Failed to build document: " + err.message);
+      return null;
     } finally {
       setBuilding(false);
     }
   }
 
-  function triggerDownload(url, filename) {
-    const name = filename || originalFile.name.replace(".pdf", "") + "-tailored.pdf";
+  async function handleDownloadDocx() {
+    const url = await buildDocx();
+    if (!url) return;
+    const name = originalFile.name.replace(/\.(docx|doc)$/i, "") + "-tailored.docx";
+    triggerDownload(url, name);
+  }
+
+  async function handleOpenGoogleDocs() {
+    const url = await buildDocx();
+    if (!url) return;
+    // Download first, then show instructions
+    const name = originalFile.name.replace(/\.(docx|doc)$/i, "") + "-tailored.docx";
+    triggerDownload(url, name);
+    // Open Google Docs upload page
+    setTimeout(() => window.open("https://docs.google.com/", "_blank"), 500);
+  }
+
+  function triggerDownload(url, name) {
     const a = document.createElement("a");
     a.href = url;
     a.download = name;
@@ -193,32 +101,72 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
     <div className="result-panel">
       <div className="result-header">
         <div className="result-meta">
-          <span className="badge">{changedCount} lines updated</span>
-          <span className="badge-sub">~{Math.round((1 - changedCount / diff.length) * 100)}% preserved</span>
+          <span className="badge">{changedCount} paragraphs updated</span>
+          <span className="badge-sub">
+            ~{Math.round((1 - changedCount / Math.max(diff.filter(l => l.original.trim()).length, 1)) * 100)}% preserved
+          </span>
         </div>
         <div className="result-actions">
           <button className="btn-ghost" onClick={onReset}>← New resume</button>
-          <button className="btn-download" onClick={handleDownload} disabled={building}>
-            {building ? <><span className="spinner spinner-sm" /> Building PDF…</> : "↓ Download PDF"}
-          </button>
         </div>
       </div>
 
+      {/* Download options */}
+      <div className="download-row">
+        <button
+          className="btn-download"
+          onClick={handleDownloadDocx}
+          disabled={building}
+        >
+          {building ? (
+            <><span className="spinner spinner-sm" /> Building…</>
+          ) : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M7 1v8M4 6l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M1 11h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+              </svg>
+              Download .docx
+            </>
+          )}
+        </button>
+
+        <button
+          className="btn-gdocs"
+          onClick={handleOpenGoogleDocs}
+          disabled={building}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <rect x="2" y="1" width="10" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M4 5h6M4 7.5h6M4 10h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+          </svg>
+          Open in Google Docs
+        </button>
+
+        <span className="gdocs-hint">Downloads file → upload to Google Docs → export as PDF</span>
+      </div>
+
+      {buildError && <p className="error-msg" style={{margin: "0 20px 16px"}}>{buildError}</p>}
+
       <div className="tab-bar">
-        <button className={`tab ${view === "diff" ? "tab-active" : ""}`} onClick={() => setView("diff")}>Changes</button>
-        <button className={`tab ${view === "tailored" ? "tab-active" : ""}`} onClick={() => setView("tailored")}>Full text</button>
+        <button className={`tab ${view === "diff" ? "tab-active" : ""}`} onClick={() => setView("diff")}>
+          Changes
+        </button>
+        <button className={`tab ${view === "tailored" ? "tab-active" : ""}`} onClick={() => setView("tailored")}>
+          Full text
+        </button>
       </div>
 
       {view === "diff" ? (
         <div className="diff-view">
           {diff.map((line, i) =>
-            line.changed ? (
+            line.changed && (line.original.trim() || line.tailored.trim()) ? (
               <div key={i} className="diff-block">
                 <div className="diff-line diff-removed">
-                  {line.original ? renderDiffTokens(line.ops, "original") : <em>—</em>}
+                  {line.original.trim() ? renderDiffTokens(line.ops, "original") : <em>—</em>}
                 </div>
                 <div className="diff-line diff-added">
-                  {line.tailored ? renderDiffTokens(line.ops, "tailored") : <em>—</em>}
+                  {line.tailored.trim() ? renderDiffTokens(line.ops, "tailored") : <em>—</em>}
                 </div>
               </div>
             ) : null
