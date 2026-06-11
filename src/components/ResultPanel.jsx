@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { injectTextIntoDocx } from "../lib/docxProcessor";
 
-// Word-level diff between two strings using LCS
+// Word-level diff using LCS
 function diffWords(origStr, tailStr) {
   const a = origStr.split(/(\s+)/).filter(Boolean);
   const b = tailStr.split(/(\s+)/).filter(Boolean);
@@ -22,23 +22,7 @@ function diffWords(origStr, tailStr) {
   return ops;
 }
 
-// Render one side of a word diff
-function DiffLine({ ops, side }) {
-  return (
-    <span>
-      {ops.map((tok, i) => {
-        if (tok.type === "same") return <span key={i}>{tok.value}</span>;
-        if (side === "original" && tok.type === "del")
-          return <mark key={i} className="hl-del">{tok.value}</mark>;
-        if (side === "tailored" && tok.type === "add")
-          return <mark key={i} className="hl-add">{tok.value}</mark>;
-        return null;
-      })}
-    </span>
-  );
-}
-
-// Similarity score between two strings (0–1), used for fuzzy paragraph matching
+// Similarity score for paragraph matching
 function similarity(a, b) {
   if (!a || !b) return 0;
   const aWords = new Set(a.toLowerCase().split(/\s+/));
@@ -47,55 +31,35 @@ function similarity(a, b) {
   return (2 * common) / (aWords.size + bWords.length);
 }
 
-// Paragraph-level LCS diff — matches paragraphs by similarity, not position
-// Returns array of { type: "same"|"changed"|"added"|"removed", original, tailored, ops }
+// Match original paragraphs to tailored paragraphs by similarity
 function computeParagraphDiff(originalText, tailoredText) {
   const origParas = originalText.split("\n").map(s => s.trim()).filter(Boolean);
   const tailParas = tailoredText.split("\n").map(s => s.trim()).filter(Boolean);
-
   const results = [];
-
-  // Greedy matching: for each original paragraph, find best match in tailored
   const usedTail = new Set();
 
   for (let i = 0; i < origParas.length; i++) {
     const orig = origParas[i];
-
-    // Find best matching tailored paragraph not yet used
-    let bestIdx = -1;
-    let bestScore = 0;
+    let bestIdx = -1, bestScore = 0;
     for (let j = 0; j < tailParas.length; j++) {
       if (usedTail.has(j)) continue;
       const score = similarity(orig, tailParas[j]);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIdx = j;
-      }
+      if (score > bestScore) { bestScore = score; bestIdx = j; }
     }
 
     if (bestIdx === -1 || bestScore < 0.3) {
-      // No good match — this paragraph was removed
       results.push({ type: "removed", original: orig, tailored: "" });
     } else {
       const tail = tailParas[bestIdx];
       usedTail.add(bestIdx);
-
       if (orig === tail) {
-        // Identical — skip (don't show in diff)
         results.push({ type: "same", original: orig, tailored: tail });
       } else {
-        const ops = diffWords(orig, tail);
-        const hasChange = ops.some(op => op.type !== "same");
-        if (hasChange) {
-          results.push({ type: "changed", original: orig, tailored: tail, ops });
-        } else {
-          results.push({ type: "same", original: orig, tailored: tail });
-        }
+        results.push({ type: "changed", original: orig, tailored: tail, ops: diffWords(orig, tail) });
       }
     }
   }
 
-  // Any tailored paragraphs not matched are "added"
   for (let j = 0; j < tailParas.length; j++) {
     if (!usedTail.has(j)) {
       results.push({ type: "added", original: "", tailored: tailParas[j] });
@@ -113,20 +77,17 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
 
   const diff = computeParagraphDiff(originalText, tailoredText);
   const changedCount = diff.filter(d => d.type === "changed").length;
-  const totalOriginal = diff.filter(d => d.type !== "added").length;
-  const preservedPct = totalOriginal > 0
-    ? Math.round(((totalOriginal - changedCount) / totalOriginal) * 100)
-    : 100;
+  const totalOrig = diff.filter(d => d.type !== "added").length;
+  const preservedPct = totalOrig > 0 ? Math.round(((totalOrig - changedCount) / totalOrig) * 100) : 100;
+  const visibleDiffs = diff.filter(d => d.type !== "same");
 
   async function buildDocx() {
     if (docxUrl) return docxUrl;
     setBuilding(true);
     setBuildError("");
     try {
-      const docxBuffer = await injectTextIntoDocx(originalFile, originalText, tailoredText);
-      const blob = new Blob([docxBuffer], {
-        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      });
+      const buf = await injectTextIntoDocx(originalFile, originalText, tailoredText);
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
       const url = URL.createObjectURL(blob);
       setDocxUrl(url);
       return url;
@@ -138,10 +99,14 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
     }
   }
 
+  function triggerDownload(url, name) {
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+  }
+
   async function handleDownloadDocx() {
     const url = await buildDocx();
-    if (!url) return;
-    triggerDownload(url, originalFile.name.replace(/\.(docx|doc)$/i, "") + "-tailored.docx");
+    if (url) triggerDownload(url, originalFile.name.replace(/\.(docx|doc)$/i, "") + "-tailored.docx");
   }
 
   async function handleOpenGoogleDocs() {
@@ -151,14 +116,37 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
     setTimeout(() => window.open("https://docs.google.com/", "_blank"), 500);
   }
 
-  function triggerDownload(url, name) {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
+  function renderOps(ops, side) {
+    return ops.map((tok, i) => {
+      if (tok.type === "same") {
+        return <span key={i} style={{ color: side === "del" ? "#aaa" : "#ccc" }}>{tok.value}</span>;
+      }
+      if (side === "del" && tok.type === "del") {
+        return (
+          <span key={i} style={{
+            background: "rgba(255,80,80,0.25)",
+            color: "#ff9090",
+            borderRadius: "3px",
+            padding: "1px 3px",
+            textDecoration: "line-through",
+            textDecorationColor: "rgba(255,80,80,0.6)",
+          }}>{tok.value}</span>
+        );
+      }
+      if (side === "add" && tok.type === "add") {
+        return (
+          <span key={i} style={{
+            background: "rgba(60,220,120,0.2)",
+            color: "#50e898",
+            borderRadius: "3px",
+            padding: "1px 3px",
+            fontWeight: "500",
+          }}>{tok.value}</span>
+        );
+      }
+      return null;
+    });
   }
-
-  const changedDiffs = diff.filter(d => d.type === "changed" || d.type === "added" || d.type === "removed");
 
   return (
     <div className="result-panel">
@@ -174,27 +162,13 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
 
       <div className="download-row">
         <button className="btn-download" onClick={handleDownloadDocx} disabled={building}>
-          {building ? (
-            <><span className="spinner spinner-sm" /> Building…</>
-          ) : (
-            <>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M7 1v8M4 6l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M1 11h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
-              </svg>
-              Download .docx
-            </>
-          )}
+          {building
+            ? <><span className="spinner spinner-sm" /> Building…</>
+            : <>↓ Download .docx</>}
         </button>
-
         <button className="btn-gdocs" onClick={handleOpenGoogleDocs} disabled={building}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <rect x="2" y="1" width="10" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-            <path d="M4 5h6M4 7.5h6M4 10h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-          </svg>
           Open in Google Docs
         </button>
-
         <span className="gdocs-hint">Download → upload to Google Docs → export as PDF</span>
       </div>
 
@@ -211,34 +185,46 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
 
       {view === "diff" ? (
         <div className="diff-view">
-          {changedDiffs.length === 0 ? (
-            <p className="no-changes">No changes detected — the resume already matches the JD well.</p>
+          {visibleDiffs.length === 0 ? (
+            <p className="no-changes">No changes — resume already matches the JD well.</p>
           ) : (
-            changedDiffs.map((entry, i) => (
-              <div key={i} className={`diff-block diff-block-${entry.type}`}>
-                {entry.type === "changed" && (
-                  <>
-                    <div className="diff-label del-label">Original</div>
-                    <div className="diff-line diff-removed">
-                      <DiffLine ops={entry.ops} side="original" />
+            visibleDiffs.map((entry, i) => (
+              <div key={i} style={{
+                border: "1px solid #2a2a2a",
+                borderRadius: "8px",
+                overflow: "hidden",
+                marginBottom: "14px",
+              }}>
+                {/* Original row */}
+                {(entry.type === "changed" || entry.type === "removed") && (
+                  <div style={{ background: "rgba(255,60,60,0.07)", borderBottom: entry.type === "changed" ? "1px solid #2a2a2a" : "none" }}>
+                    <div style={{
+                      fontSize: "10px", fontWeight: 700, letterSpacing: "0.08em",
+                      textTransform: "uppercase", padding: "5px 14px",
+                      color: "#ff6b6b", background: "rgba(255,60,60,0.1)"
+                    }}>
+                      {entry.type === "removed" ? "Removed" : "Before"}
                     </div>
-                    <div className="diff-label add-label">Tailored</div>
-                    <div className="diff-line diff-added">
-                      <DiffLine ops={entry.ops} side="tailored" />
+                    <div style={{ padding: "10px 14px", fontSize: "13px", lineHeight: 1.65, color: "#bbb", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                      {entry.type === "changed" ? renderOps(entry.ops, "del") : entry.original}
                     </div>
-                  </>
+                  </div>
                 )}
-                {entry.type === "removed" && (
-                  <>
-                    <div className="diff-label del-label">Removed</div>
-                    <div className="diff-line diff-removed">{entry.original}</div>
-                  </>
-                )}
-                {entry.type === "added" && (
-                  <>
-                    <div className="diff-label add-label">Added</div>
-                    <div className="diff-line diff-added">{entry.tailored}</div>
-                  </>
+
+                {/* Tailored row */}
+                {(entry.type === "changed" || entry.type === "added") && (
+                  <div style={{ background: "rgba(50,200,100,0.06)" }}>
+                    <div style={{
+                      fontSize: "10px", fontWeight: 700, letterSpacing: "0.08em",
+                      textTransform: "uppercase", padding: "5px 14px",
+                      color: "#4ddb8a", background: "rgba(50,200,100,0.1)"
+                    }}>
+                      {entry.type === "added" ? "Added" : "After"}
+                    </div>
+                    <div style={{ padding: "10px 14px", fontSize: "13px", lineHeight: 1.65, color: "#ddd", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                      {entry.type === "changed" ? renderOps(entry.ops, "add") : entry.tailored}
+                    </div>
+                  </div>
                 )}
               </div>
             ))
