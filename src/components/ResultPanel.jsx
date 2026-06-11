@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import * as pdfjsLib from "pdfjs-dist";
 import { groupItemsIntoLines } from "../lib/pdfLines";
+import { extractEmbeddedFontBytes } from "../lib/pdfFonts";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -89,6 +91,20 @@ function sanitizeForFont(text, font) {
   return result;
 }
 
+// Whether a font can render every character of the text (after applying our
+// known character substitutions)
+function canEncode(font, text) {
+  for (const ch of text) {
+    const mapped = PDF_CHAR_REPLACEMENTS[ch] ?? ch;
+    try {
+      font.widthOfTextAtSize(mapped, 10);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Build a new PDF by replacing changed lines in place.
 // For each visual line, white out its bounding box and redraw the tailored
 // text scaled to fit within the original line's width.
@@ -98,9 +114,25 @@ async function buildTailoredPDF(originalFile, originalText, tailoredText) {
   // Load with pdfjs to get per-page text items with positions
   const pdfjsDoc = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
   const pdfLibDoc = await PDFDocument.load(arrayBuffer);
+  pdfLibDoc.registerFontkit(fontkit);
   const pages = pdfLibDoc.getPages();
 
-  const font = await pdfLibDoc.embedFont(StandardFonts.Helvetica);
+  const fallbackFont = await pdfLibDoc.embedFont(StandardFonts.Helvetica);
+
+  // Try to reuse the resume's own embedded fonts so replacement text matches
+  // the original style. Fall back to Helvetica for any font that fails to
+  // embed or can't encode a given line's characters.
+  const candidateFonts = [];
+  for (const bytes of extractEmbeddedFontBytes(pdfLibDoc)) {
+    try {
+      candidateFonts.push(await pdfLibDoc.embedFont(bytes, { subset: true }));
+    } catch {
+      // pdf-lib/fontkit couldn't parse this font program — skip it
+    }
+  }
+  candidateFonts.push(fallbackFont);
+
+  const pickFont = (text) => candidateFonts.find((f) => canEncode(f, text)) ?? fallbackFont;
 
   const normalize = (line) => line.replace(/\s+/g, " ").trim();
   const originalLines = originalText.split("\n").map(normalize).filter(Boolean);
@@ -140,10 +172,13 @@ async function buildTailoredPDF(originalFile, originalText, tailoredText) {
         color: rgb(1, 1, 1),
       });
 
+      // Pick a font that can render this line, preferring the resume's own fonts
+      const lineFont = pickFont(replacement);
+      const safeText = sanitizeForFont(replacement, lineFont);
+
       // Shrink the font if needed so the replacement fits the original width
-      const safeText = sanitizeForFont(replacement, font);
       let fontSize = line.height;
-      const naturalWidth = font.widthOfTextAtSize(safeText, fontSize);
+      const naturalWidth = lineFont.widthOfTextAtSize(safeText, fontSize);
       if (naturalWidth > width && naturalWidth > 0) {
         fontSize = Math.max(6, fontSize * (width / naturalWidth));
       }
@@ -152,7 +187,7 @@ async function buildTailoredPDF(originalFile, originalText, tailoredText) {
         x: line.x,
         y: line.y,
         size: fontSize,
-        font,
+        font: lineFont,
         color: rgb(0, 0, 0),
       });
     }
