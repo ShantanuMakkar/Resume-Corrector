@@ -11,6 +11,7 @@ export default function App() {
   const [status, setStatus] = useState("idle");
   const [tailoredText, setTailoredText] = useState("");
   const [tailorStats, setTailorStats] = useState(null);
+  const [analysis, setAnalysis] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
   const canTailor = resumeFile && resumeText && jd.trim().length > 50;
@@ -31,6 +32,7 @@ export default function App() {
       const data = await response.json();
       setTailoredText(data.tailoredText);
       setTailorStats(data.stats || null);
+      setAnalysis(data.analysis || null);
       setStatus("done");
     } catch (err) {
       setErrorMsg(err.message);
@@ -45,6 +47,7 @@ export default function App() {
     setStatus("idle");
     setTailoredText("");
     setTailorStats(null);
+    setAnalysis(null);
     setErrorMsg("");
   }
 
@@ -63,7 +66,9 @@ export default function App() {
           originalText={resumeText}
           tailoredText={tailoredText}
           originalFile={resumeFile}
+          jd={jd}
           tailorStats={tailorStats}
+          analysis={analysis}
           onReset={handleReset}
         />
       ) : (

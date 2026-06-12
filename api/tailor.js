@@ -19,33 +19,49 @@ export default async function handler(req, res) {
     const origLines = resumeText.split("\n");
     const originalWordCount = resumeText.split(/\s+/).filter(Boolean).length;
 
-    const systemPrompt = `You are an expert resume tailoring assistant.
+    const systemPrompt = `You are an expert ATS resume optimization assistant helping a candidate bulk-apply to jobs efficiently.
 
-YOUR GOAL: Tailor the resume to better match the job description by making targeted keyword and phrasing changes.
+Your job has TWO parts:
 
-WHAT TO CHANGE (priority order):
-1. Professional summary lines (usually the first 2-3 lines after the name) — rewrite to mirror JD's role title and key focus areas
-2. Skills section — swap or add keywords from JD that match the candidate's actual experience; remove or deprioritize skills not mentioned in JD
-3. Bullet points — swap action verbs and tech keywords to match JD language where genuinely applicable
-4. "Technologies used" lines — reorder or swap to lead with JD-relevant technologies
+---
+PART 1 — TAILOR THE RESUME
 
-HARD RULES:
-- Output must have EXACTLY ${origLines.length} lines — same line count as input, no more, no less
-- Each output line must be no longer than the corresponding input line (in characters) — this is critical for page layout
-- NEVER change: name, contact info, company names, job titles, dates, education institution, certifications
-- NEVER fabricate skills or experience not already present in the resume
-- NEVER add new lines or merge lines
-- If a line cannot be improved within its character limit, return it UNCHANGED
+Make targeted changes to maximize ATS keyword match and recruiter relevance for the specific JD.
 
-OUTPUT: Return ONLY the resume text. Exact same number of lines as input. No commentary.`;
+What to change (in priority order):
+1. SUMMARY (first 2-3 lines after name): Rewrite to mirror the JD's exact role title and primary focus areas
+2. SKILLS SECTION: Reorder to lead with JD-critical skills. Swap generic terms for JD's exact terminology (e.g. "Shell Scripting" → "Bash" if JD says "Bash"). Add JD keywords the candidate demonstrably has but didn't list.
+3. BULLET POINTS: Replace action verbs and tech terms with JD's exact language where the underlying experience matches. Lead bullets with the most JD-relevant achievements.
+4. TECH STACKS: Reorder "Technologies used" lines to lead with tools the JD explicitly mentions.
+
+Hard rules:
+- Output must have EXACTLY ${origLines.length} lines
+- Each output line must be equal or shorter in characters than the corresponding input line
+- NEVER change: name, contact info, company names, job titles, dates, education, certifications
+- NEVER fabricate experience or skills not present in the resume
+- NEVER add new lines or merge lines — same structure
+
+---
+PART 2 — ANALYSIS
+
+After the resume, output a JSON block (and ONLY valid JSON, no markdown) in this exact format:
+
+<<<ANALYSIS>>>
+{
+  "matchScore": 72,
+  "matchedKeywords": ["keyword1", "keyword2"],
+  "missingKeywords": ["keyword3", "keyword4"],
+  "missingContext": "Brief note on what's missing and why it matters for this role",
+  "titleAlignment": "How well the candidate's title/experience aligns with the JD role",
+  "recommendation": "1-2 sentence honest assessment: should they apply, and what to highlight in cover letter"
+}
+<<<END>>>`;
 
     const userPrompt = `JOB DESCRIPTION:
 ${jd}
 
-RESUME TO TAILOR (${origLines.length} lines, ${originalWordCount} words):
-${resumeText}
-
-Return exactly ${origLines.length} lines. Each line must be same length or shorter than the original.`;
+RESUME (${origLines.length} lines, ${originalWordCount} words — output must match line count exactly):
+${resumeText}`;
 
     const model = client.getGenerativeModel({
       model: "gemini-2.5-flash",
@@ -53,16 +69,27 @@ Return exactly ${origLines.length} lines. Each line must be same length or short
     });
 
     const response = await model.generateContent(userPrompt);
-    let tailoredText = response.response.text().trim();
+    const raw = response.response.text().trim();
 
-    // Server-side enforcement
+    // Split resume text from analysis JSON
+    const analysisSplit = raw.split("<<<ANALYSIS>>>");
+    let tailoredText = analysisSplit[0].trim();
+    let analysis = null;
+
+    if (analysisSplit.length > 1) {
+      const jsonRaw = analysisSplit[1].split("<<<END>>>")[0].trim();
+      try {
+        analysis = JSON.parse(jsonRaw);
+      } catch (e) {
+        console.warn("Failed to parse analysis JSON:", e.message);
+      }
+    }
+
+    // Server-side enforcement: line count + per-line length
     const tailLines = tailoredText.split("\n");
-
-    // Fix line count
     while (tailLines.length > origLines.length) tailLines.pop();
     while (tailLines.length < origLines.length) tailLines.push(origLines[tailLines.length]);
 
-    // Fix per-line length — revert any line that got longer
     const corrected = origLines.map((origLine, i) => {
       const tail = tailLines[i] ?? origLine;
       return tail.length > origLine.length + 3 ? origLine : tail;
@@ -73,6 +100,7 @@ Return exactly ${origLines.length} lines. Each line must be same length or short
 
     return res.status(200).json({
       tailoredText,
+      analysis,
       stats: {
         originalLines: origLines.length,
         tailoredLines: corrected.length,
