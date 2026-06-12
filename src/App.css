@@ -389,39 +389,7 @@ body {
 }
 
 /* Diff view */
-.diff-view {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: 520px;
-  overflow-y: auto;
-}
 
-.diff-block {
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-}
-
-.diff-line {
-  padding: 9px 14px;
-  font-size: 13px;
-  line-height: 1.5;
-  font-family: "SF Mono", "Fira Code", monospace;
-}
-
-.diff-removed {
-  background: var(--red-dim);
-  color: #ff8a8a;
-  text-decoration: line-through;
-  text-decoration-color: rgba(255,94,94,0.4);
-}
-
-.diff-added {
-  background: var(--green-dim);
-  color: #7fe8ab;
-}
 
 .diff-word-removed {
   background: rgba(255, 94, 94, 0.35);
@@ -581,4 +549,81 @@ body {
   border-radius: 9px;
   padding: 0 5px;
   margin-left: 6px;
+}
+
+/* Diff view */
+.diff-view {
+  padding: 20px;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.no-changes {
+  color: #888;
+  font-size: 13px;
+  padding: 12px 0;
+}
+
+.tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  padding: 0 5px;
+  margin-left: 6px;
+}
+
+/* Download row */
+.download-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.btn-gdocs {
+  background: var(--surface2);
+  color: #bbb;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.btn-gdocs:hover:not(:disabled) { border-color: var(--border-hover); color: #eee; }
+.btn-gdocs:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.gdocs-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Text view */
+.text-view {
+  padding: 20px;
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+.text-view pre {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #aaa;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
