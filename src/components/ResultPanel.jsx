@@ -149,47 +149,17 @@ function AnalysisPanel({ analysis }) {
   );
 }
 
-function RecommendationsPanel({ originalText, tailoredText, jd }) {
-  const [recs, setRecs] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [fetched, setFetched] = useState(false);
-
-  async function fetchRecs() {
-    if (fetched) return;
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch("/api/recommend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resumeText: originalText, jd }),
-      });
-      if (!res.ok) throw new Error("Failed to fetch recommendations");
-      const data = await res.json();
-      setRecs(data.recommendations);
-      setFetched(true);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Auto-fetch when panel mounts
-  useState(() => { fetchRecs(); }, []);
-
-  if (loading) return (
+function RecommendationsPanel({ recs, recsLoading, recsError }) {
+  if (recsLoading) return (
     <div style={{ padding: "40px 20px", display: "flex", alignItems: "center", gap: "12px", color: "#888" }}>
       <span className="spinner" style={{ borderColor: "rgba(200,240,100,0.2)", borderTopColor: "#c8f064" }} />
       Analyzing your profile against the JD…
     </div>
   );
 
-  if (error) return (
+  if (recsError) return (
     <div style={{ padding: "20px" }}>
-      <p style={{ color: "#ff8a8a", fontSize: "13px" }}>{error}</p>
-      <button onClick={fetchRecs} style={{ marginTop: "8px", background: "none", border: "1px solid #3a3a3a", color: "#aaa", borderRadius: "6px", padding: "6px 12px", cursor: "pointer", fontSize: "12px" }}>Retry</button>
+      <p style={{ color: "#ff8a8a", fontSize: "13px" }}>{recsError}</p>
     </div>
   );
 
@@ -279,6 +249,29 @@ function RecommendationsPanel({ originalText, tailoredText, jd }) {
 
 export default function ResultPanel({ originalText, tailoredText, originalFile, tailorStats, analysis, jd, onReset }) {
   const [view, setView] = useState("diff");
+  const [recs, setRecs] = useState(null);
+  const [recsLoading, setRecsLoading] = useState(true);
+  const [recsError, setRecsError] = useState("");
+
+  // Fetch recommendations immediately on mount — ready by the time user clicks the tab
+  useState(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/recommend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resumeText: originalText, jd }),
+        });
+        if (!res.ok) throw new Error("Failed to fetch recommendations");
+        const data = await res.json();
+        setRecs(data.recommendations);
+      } catch (err) {
+        setRecsError(err.message);
+      } finally {
+        setRecsLoading(false);
+      }
+    })();
+  }, []);
   const [building, setBuilding] = useState(false);
   const [docxUrl, setDocxUrl] = useState(null);
   const [buildError, setBuildError] = useState("");
@@ -390,24 +383,28 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
               <>
                 {semantic.length > 0 && (
                   <div style={{ marginBottom: "24px" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#c8f064", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span>Content changes</span>
-                      <span style={{ background: "rgba(200,240,100,0.12)", color: "#c8f064", borderRadius: "10px", padding: "1px 8px", fontSize: "10px" }}>{semantic.length}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+                      <div style={{ flex: 1, height: "1px", background: "rgba(200,240,100,0.2)" }} />
+                      <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#c8f064", display: "flex", alignItems: "center", gap: "8px", whiteSpace: "nowrap" }}>
+                        <span>Content changes</span>
+                        <span style={{ background: "rgba(200,240,100,0.12)", color: "#c8f064", borderRadius: "10px", padding: "1px 8px", fontSize: "10px" }}>{semantic.length}</span>
+                      </div>
+                      <div style={{ flex: 1, height: "1px", background: "rgba(200,240,100,0.2)" }} />
                     </div>
                     {semantic.map(renderBlock)}
                   </div>
                 )}
                 {cosmetic.length > 0 && (
                   <div>
-                    <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#555", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}
-                      onClick={e => { const el = e.currentTarget.nextSibling; el.style.display = el.style.display === "none" ? "block" : "none"; }}>
-                      <span>Formatting & punctuation</span>
-                      <span style={{ background: "#222", color: "#555", borderRadius: "10px", padding: "1px 8px", fontSize: "10px" }}>{cosmetic.length}</span>
-                      <span style={{ fontSize: "10px", color: "#444" }}>click to toggle</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", margin: "8px 0 16px" }}>
+                      <div style={{ flex: 1, height: "1px", background: "#2a2a2a" }} />
+                      <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#444", display: "flex", alignItems: "center", gap: "8px", whiteSpace: "nowrap" }}>
+                        <span>Formatting & punctuation</span>
+                        <span style={{ background: "#222", color: "#555", borderRadius: "10px", padding: "1px 8px", fontSize: "10px" }}>{cosmetic.length}</span>
+                      </div>
+                      <div style={{ flex: 1, height: "1px", background: "#2a2a2a" }} />
                     </div>
-                    <div style={{ display: "none" }}>
-                      {cosmetic.map(renderBlock)}
-                    </div>
+                    {cosmetic.map(renderBlock)}
                   </div>
                 )}
               </>
@@ -415,7 +412,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
           })()}
         </div>
       ) : (
-        <RecommendationsPanel originalText={originalText} tailoredText={tailoredText} jd={jd} />
+        <RecommendationsPanel recs={recs} recsLoading={recsLoading} recsError={recsError} />
       )}
     </div>
   );
