@@ -16,38 +16,36 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing resumeText or jd" });
     }
 
-    const originalLines = resumeText.split("\n");
+    const origLines = resumeText.split("\n");
     const originalWordCount = resumeText.split(/\s+/).filter(Boolean).length;
 
-    // Build per-paragraph character budget
-    const paraLimits = originalLines
-      .map((line, i) => `Line ${i+1} (max ${line.length} chars): ${line}`)
-      .join("\n");
+    const systemPrompt = `You are an expert resume tailoring assistant.
 
-    const systemPrompt = `You are a precise resume tailoring assistant.
+YOUR GOAL: Tailor the resume to better match the job description by making targeted keyword and phrasing changes.
 
-HARD CONSTRAINTS — MUST BE FOLLOWED EXACTLY:
-1. Output must have EXACTLY ${originalLines.length} lines — same as input
-2. Each output line must be EQUAL OR SHORTER in character count than the input line
-3. Total word count must stay within ±20 words of the original (${originalWordCount} words)
-4. NEVER add new sentences, bullet points, or expand existing ones
-5. If you cannot improve a line without exceeding its character limit, return it UNCHANGED
+WHAT TO CHANGE (priority order):
+1. Professional summary lines (usually the first 2-3 lines after the name) — rewrite to mirror JD's role title and key focus areas
+2. Skills section — swap or add keywords from JD that match the candidate's actual experience; remove or deprioritize skills not mentioned in JD
+3. Bullet points — swap action verbs and tech keywords to match JD language where genuinely applicable
+4. "Technologies used" lines — reorder or swap to lead with JD-relevant technologies
 
-TAILORING RULES:
-- NEVER change: name, companies, job titles, dates, education, certifications, contact info
-- ONLY swap individual keywords/phrases within existing lines
-- Mirror JD language only where it maps directly to existing experience
-- Same tone, same voice
+HARD RULES:
+- Output must have EXACTLY ${origLines.length} lines — same line count as input, no more, no less
+- Each output line must be no longer than the corresponding input line (in characters) — this is critical for page layout
+- NEVER change: name, contact info, company names, job titles, dates, education institution, certifications
+- NEVER fabricate skills or experience not already present in the resume
+- NEVER add new lines or merge lines
+- If a line cannot be improved within its character limit, return it UNCHANGED
 
-OUTPUT: Return ONLY the resume text. No commentary. No markdown. Exact same line count as input.`;
+OUTPUT: Return ONLY the resume text. Exact same number of lines as input. No commentary.`;
 
-    const userPrompt = `Tailor this resume for the job description below.
-Each line has a character limit — do NOT exceed it.
+    const userPrompt = `JOB DESCRIPTION:
+${jd}
 
-${paraLimits}
+RESUME TO TAILOR (${origLines.length} lines, ${originalWordCount} words):
+${resumeText}
 
-JOB DESCRIPTION:
-${jd}`;
+Return exactly ${origLines.length} lines. Each line must be same length or shorter than the original.`;
 
     const model = client.getGenerativeModel({
       model: "gemini-2.5-flash",
@@ -57,26 +55,20 @@ ${jd}`;
     const response = await model.generateContent(userPrompt);
     let tailoredText = response.response.text().trim();
 
-    // Server-side enforcement: check every line against original char count
-    const origLines = resumeText.split("\n");
+    // Server-side enforcement
     const tailLines = tailoredText.split("\n");
 
-    // If line count drifted, trim or pad
+    // Fix line count
     while (tailLines.length > origLines.length) tailLines.pop();
     while (tailLines.length < origLines.length) tailLines.push(origLines[tailLines.length]);
 
-    // Enforce per-line char limit
+    // Fix per-line length — revert any line that got longer
     const corrected = origLines.map((origLine, i) => {
-      const tailLine = tailLines[i] ?? origLine;
-      // If tailored line exceeds original length by more than 5 chars, revert
-      if (tailLine.length > origLine.length + 5) {
-        return origLine;
-      }
-      return tailLine;
+      const tail = tailLines[i] ?? origLine;
+      return tail.length > origLine.length + 3 ? origLine : tail;
     });
 
     tailoredText = corrected.join("\n");
-
     const tailoredWordCount = tailoredText.split(/\s+/).filter(Boolean).length;
 
     return res.status(200).json({
