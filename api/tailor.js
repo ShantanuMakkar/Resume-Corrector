@@ -19,58 +19,65 @@ export default async function handler(req, res) {
     const origLines = resumeText.split("\n");
     const originalWordCount = resumeText.split(/\s+/).filter(Boolean).length;
 
-    const systemPrompt = `You are an expert ATS optimization specialist. Your ONLY job is to maximize keyword coverage between the resume and job description.
+    const systemPrompt = `You are an ATS optimization specialist. Your job is to maximize keyword coverage between a resume and job description by injecting missing JD keywords into the resume.
 
-STEP 1 — KEYWORD GAP ANALYSIS (do this mentally first):
-- Extract every technical skill, tool, methodology, and domain term from the JD
-- Find which ones are ABSENT or UNDER-REPRESENTED in the resume
-- These missing keywords are your insertion targets
+STEP 1 — IDENTIFY MISSING KEYWORDS:
+Extract every technical skill, tool, methodology, and domain term from the JD. Find which ones are absent or under-represented in the resume. These are your injection targets.
 
-STEP 2 — KEYWORD INJECTION (this is your actual task):
-Insert missing JD keywords into the resume where they GENUINELY fit based on the candidate's existing experience.
+STEP 2 — INJECT KEYWORDS:
 
-WHERE to inject keywords:
-1. SKILLS LINE: This is your primary target. Swap lower-priority skills for missing JD keywords. Reorder to lead with JD-critical terms. Rename existing skills to match JD's exact terminology (e.g. if JD says "Observability" and resume has "Prometheus/Grafana", replace with "Observability (Prometheus/Grafana)")
-2. BULLET POINTS: If a bullet describes work that clearly used a missing JD technology, add that technology by name. Only add where genuinely applicable.
-3. SUMMARY: Mirror the JD's exact role title and top 3 required skills
+TARGET 1 — SKILLS LINE (highest priority):
+Restructure to lead with JD-critical terms. Use JD's exact terminology. Group related tools.
 
-WHAT NOT TO DO:
-- Do NOT fix grammar, punctuation, or rephrase sentences for style
-- Do NOT swap "and" for "&" or change formatting
-- Do NOT reorder bullet points
-- Do NOT change any numbers, percentages, company names, dates
-- Do NOT add technologies the candidate clearly doesn't have
-- NEVER fabricate experience
+TARGET 2 — BULLET POINTS (critical — do not skip):
+For each bullet point, ask: does this work clearly involve a JD keyword that isn't mentioned?
+If yes — inject it. To make room, trim filler words like "successfully", "effectively", "in order to", "utilizing", "leveraging", or verbose phrases.
 
-LINE COUNT RULE:
-- Output must have EXACTLY ${origLines.length} lines
-- Each line must be equal or shorter in characters than the original
-- If a line cannot absorb a keyword without exceeding its character limit, skip it
+Example of correct bullet point injection:
+Original (128c): "Built production Alerts App on AWS with Lambda/API Gateway/SQS ingestion, boosting throughput by 40% and cutting latency by 25%."
+JD has "EventBridge" and "SNS" → inject them, trim "ingestion":
+Result (124c):   "Built production Alerts App on AWS (Lambda, SQS, SNS, EventBridge), boosting throughput by 40% and cutting latency by 25%."
 
-OUTPUT: Return ONLY the modified resume text. No commentary. Exact same line count.`;
+Example of correct bullet point injection:
+Original: "Automated Terraform deployments and Dockerized apps with Python/Bash scripting, reducing manual ops efforts by 50%."
+JD has "GitOps" → inject it, trim "scripting":
+Result:   "Automated Terraform/GitOps deployments and containerized apps with Python/Bash, reducing manual ops efforts by 50%."
+
+TARGET 3 — SUMMARY (first 2-3 lines after name):
+Mirror the JD's exact role title and top required skills.
+
+HARD RULES:
+- Output EXACTLY ${origLines.length} lines — same count as input
+- Each output line must be SAME LENGTH OR SHORTER than the corresponding input line
+- To inject a keyword into a long line: REMOVE filler words to create space first
+- NEVER change: company names, job titles, dates, education, contact info, certifications
+- NEVER fabricate experience not in the resume
+- Do NOT fix grammar or punctuation — only inject keywords
+- If a line truly has no relevant keyword gap, return it UNCHANGED
+
+OUTPUT: Return ONLY the resume text. ${origLines.length} lines. No commentary.`;
 
     const userPrompt = `JOB DESCRIPTION:
 ${jd}
 
-RESUME (${origLines.length} lines — output must match exactly):
+RESUME (${origLines.length} lines — each output line must be ≤ original line length):
 ${resumeText}
 
-Focus: inject missing JD keywords where they genuinely fit. Do not touch lines that don't need keyword changes.`;
+Inject missing JD keywords into the skills line AND bullet points. Trim filler words to make room.`;
 
     const model = client.getGenerativeModel({
       model: "gemini-2.5-flash",
       systemInstruction: systemPrompt,
     });
 
-    // Also get analysis in parallel
-    const analysisPrompt = `Analyze this resume against the job description and return ONLY valid JSON (no markdown):
+    const analysisPrompt = `Analyze this resume against the job description. Return ONLY valid JSON, no markdown:
 
 {
-  "matchScore": <0-100 integer based on keyword overlap>,
+  "matchScore": <0-100>,
   "matchedKeywords": [<top JD keywords already in resume, max 12>],
-  "missingKeywords": [<JD keywords completely absent from resume, max 10>],
+  "missingKeywords": [<JD keywords absent from resume, max 10>],
   "missingContext": "<one sentence on the most critical gap>",
-  "titleAlignment": "<one sentence on how well candidate title/level matches>",
+  "titleAlignment": "<one sentence on how well the candidate title/level matches>",
   "recommendation": "<1-2 sentences: honest fit assessment and what to lead with>"
 }
 
@@ -82,7 +89,6 @@ ${jd}`;
 
     const analysisModel = client.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    // Run both in parallel
     const [tailorResponse, analysisResponse] = await Promise.all([
       model.generateContent(userPrompt),
       analysisModel.generateContent(analysisPrompt),
@@ -92,9 +98,9 @@ ${jd}`;
     let analysis = null;
 
     try {
-      let analysisRaw = analysisResponse.response.text().trim()
+      let raw = analysisResponse.response.text().trim()
         .replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
-      analysis = JSON.parse(analysisRaw);
+      analysis = JSON.parse(raw);
     } catch (e) {
       console.warn("Analysis parse failed:", e.message);
     }
@@ -106,7 +112,9 @@ ${jd}`;
 
     const corrected = origLines.map((origLine, i) => {
       const tail = tailLines[i] ?? origLine;
-      return tail.length > origLine.length + 3 ? origLine : tail;
+      // Allow up to 5 chars over — model should have trimmed to compensate
+      // but revert if it went significantly over without trimming
+      return tail.length > origLine.length + 5 ? origLine : tail;
     });
 
     tailoredText = corrected.join("\n");

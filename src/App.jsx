@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ResumeUpload from "./components/ResumeUpload";
 import JDInput from "./components/JDInput";
 import ResultPanel from "./components/ResultPanel";
@@ -8,13 +8,23 @@ export default function App() {
   const [resumeFile, setResumeFile] = useState(null);
   const [resumeText, setResumeText] = useState("");
   const [jd, setJd] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
+  const [company, setCompany] = useState("");
   const [status, setStatus] = useState("idle");
   const [tailoredText, setTailoredText] = useState("");
   const [tailorStats, setTailorStats] = useState(null);
   const [analysis, setAnalysis] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [elapsed, setElapsed] = useState(0);
 
   const canTailor = resumeFile && resumeText && jd.trim().length > 50;
+
+  // Elapsed timer during processing
+  useEffect(() => {
+    if (status !== "processing") { setElapsed(0); return; }
+    const t = setInterval(() => setElapsed(e => e + 1), 1000);
+    return () => clearInterval(t);
+  }, [status]);
 
   async function handleTailor() {
     setStatus("processing");
@@ -41,14 +51,21 @@ export default function App() {
   }
 
   function handleReset() {
-    setResumeFile(null);
-    setResumeText("");
-    setJd("");
     setStatus("idle");
     setTailoredText("");
     setTailorStats(null);
     setAnalysis(null);
     setErrorMsg("");
+    setJobTitle("");
+    setCompany("");
+    // Keep resume file — user likely wants to tailor for another JD
+  }
+
+  function handleFullReset() {
+    handleReset();
+    setResumeFile(null);
+    setResumeText("");
+    setJd("");
   }
 
   return (
@@ -67,9 +84,12 @@ export default function App() {
           tailoredText={tailoredText}
           originalFile={resumeFile}
           jd={jd}
+          jobTitle={jobTitle}
+          company={company}
           tailorStats={tailorStats}
           analysis={analysis}
-          onReset={handleReset}
+          onRetailor={() => handleReset()}
+          onReset={handleFullReset}
         />
       ) : (
         <main className="main-grid">
@@ -80,7 +100,28 @@ export default function App() {
               setResumeText(text);
             }}
           />
+
+          {/* Job meta */}
+          <div className="panel">
+            <div className="panel-label">Job Details <span style={{fontWeight:400, textTransform:"none", letterSpacing:0}}>— optional but helps track applications</span></div>
+            <div className="job-meta-row">
+              <input
+                className="meta-input"
+                placeholder="Job title  e.g. Senior DevOps Engineer"
+                value={jobTitle}
+                onChange={e => setJobTitle(e.target.value)}
+              />
+              <input
+                className="meta-input"
+                placeholder="Company  e.g. Stripe"
+                value={company}
+                onChange={e => setCompany(e.target.value)}
+              />
+            </div>
+          </div>
+
           <JDInput value={jd} onChange={setJd} />
+
           <div className="action-row">
             {status === "error" && <p className="error-msg">{errorMsg}</p>}
             <button
@@ -91,19 +132,19 @@ export default function App() {
               {status === "processing" ? (
                 <span className="btn-inner">
                   <span className="spinner" />
-                  Tailoring…
+                  Tailoring… {elapsed > 0 && <span style={{opacity:0.6, fontWeight:400}}>({elapsed}s)</span>}
                 </span>
               ) : (
                 "Tailor Resume"
               )}
             </button>
+            {status === "processing" && (
+              <p className="hint">Usually takes 15–25 seconds</p>
+            )}
             {!canTailor && status === "idle" && (
               <p className="hint">
-                {!resumeFile
-                  ? "Upload your resume to get started"
-                  : jd.trim().length < 50
-                  ? "Paste the full job description"
-                  : ""}
+                {!resumeFile ? "Upload your resume to get started"
+                  : jd.trim().length < 50 ? "Paste the full job description" : ""}
               </p>
             )}
           </div>
