@@ -5,15 +5,6 @@ export async function extractTextFromDocx(file) {
   return result.value.trim();
 }
 
-function similarity(a, b) {
-  if (!a || !b) return 0;
-  const aWords = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
-  const bWords = b.toLowerCase().split(/\s+/).filter(Boolean);
-  if (aWords.size === 0 || bWords.length === 0) return 0;
-  const common = bWords.filter(w => aWords.has(w)).length;
-  return (2 * common) / (aWords.size + bWords.length);
-}
-
 function escapeXml(str) {
   return str
     .replace(/&/g, "&amp;")
@@ -23,84 +14,169 @@ function escapeXml(str) {
     .replace(/'/g, "&apos;");
 }
 
-function getParaText(paraXml) {
-  return (paraXml.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [])
-    .map(m => m.replace(/<[^>]+>/g, ""))
-    .join("");
+function decodeXml(str) {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
 }
 
-// Distribute new text across existing runs proportionally by character count.
-// This preserves all run formatting (bold, font, size, color) while updating content.
-function replaceParaContent(paraXml, newText) {
-  const runRegex = /<w:r[ >][\s\S]*?<\/w:r>/g;
-  const runs = [];
+// Extract all <w:t> nodes with their exact position in the XML string
+function extractTextNodes(xml) {
+  const nodes = [];
+  const regex = /(<w:t[^>]*>)([^<]*)(<\/w:t>)/g;
   let match;
-  while ((match = runRegex.exec(paraXml)) !== null) {
-    const runText = (match[0].match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [])
-      .map(m => m.replace(/<[^>]+>/g, "")).join("");
-    runs.push({ full: match[0], text: runText, index: match.index });
+  while ((match = regex.exec(xml)) !== null) {
+    nodes.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      openTag: match[1],
+      text: decodeXml(match[2]),
+      closeTag: match[3],
+      raw: match[0],
+    });
   }
+  return nodes;
+}
 
-  if (runs.length === 0) return paraXml;
-
-  // Filter to runs that actually have text content
-  const textRuns = runs.filter(r => r.text.length > 0);
-  if (textRuns.length === 0) return paraXml;
-
-  const originalTotal = textRuns.reduce((s, r) => s + r.text.length, 0);
-
-  if (textRuns.length === 1) {
-    // Single text run — simple replacement
-    const run = textRuns[0];
-    const rPrMatch = run.full.match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
-    const rPr = rPrMatch ? rPrMatch[0] : "";
-    const newRun = `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(newText)}</w:t></w:r>`;
-    return paraXml.replace(run.full, newRun);
+// Build word-level diff between two strings using LCS
+function diffWords(a, b) {
+  const aToks = a.split(/(\s+)/).filter(Boolean);
+  const bToks = b.split(/(\s+)/).filter(Boolean);
+  const m = aToks.length, n = bToks.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--)
+    for (let j = n - 1; j >= 0; j--)
+      dp[i][j] = aToks[i] === bToks[j]
+        ? dp[i+1][j+1] + 1
+        : Math.max(dp[i+1][j], dp[i][j+1]);
+  const ops = [];
+  let i = 0, j = 0;
+  while (i < m && j < n) {
+    if (aToks[i] === bToks[j]) { ops.push({ type: "same", a: aToks[i], b: bToks[j] }); i++; j++; }
+    else if (dp[i+1][j] >= dp[i][j+1]) { ops.push({ type: "del", a: aToks[i] }); i++; }
+    else { ops.push({ type: "ins", b: bToks[j] }); j++; }
   }
+  while (i < m) ops.push({ type: "del", a: aToks[i++] });
+  while (j < n) ops.push({ type: "ins", b: bToks[j++] });
+  return ops;
+}
 
-  // Multiple text runs — distribute new text proportionally
-  // Each run gets a slice of newText proportional to its original character share
-  let result = paraXml;
-  let charPos = 0;
-  const newLen = newText.length;
+// Given a list of original runs and tailored full-paragraph text,
+// redistribute changes into the runs minimally — only updating runs that changed.
+// Returns an array of new text values parallel to the input runs array.
+function computeRunReplacements(origRuns, tailoredParaText) {
+  const origParaText = origRuns.map(r => r.text).join("");
+  if (origParaText === tailoredParaText) return origRuns.map(r => r.text);
 
-  for (let i = 0; i < textRuns.length; i++) {
-    const run = textRuns[i];
-    const isLast = i === textRuns.length - 1;
+  // Get word-level ops for the whole paragraph
+  const ops = diffWords(origParaText, tailoredParaText);
 
-    let slice;
-    if (isLast) {
-      slice = newText.slice(charPos);
-    } else {
-      const proportion = run.text.length / originalTotal;
-      const charCount = Math.round(proportion * newLen);
-      // Snap to word boundary to avoid mid-word cuts
-      let end = charPos + charCount;
-      if (end < newText.length) {
-        const nextSpace = newText.indexOf(" ", end);
-        const prevSpace = newText.lastIndexOf(" ", end);
-        if (nextSpace !== -1 && prevSpace > charPos) {
-          end = (nextSpace - end) < (end - prevSpace) ? nextSpace : prevSpace;
-        } else if (nextSpace !== -1) {
-          end = nextSpace;
+  // Reconstruct the new text for each run by tracking position in original
+  // Each run "owns" a slice of the original text — apply only the changes within its slice
+  const newRunTexts = [];
+  let origPos = 0; // position in origParaText (char index)
+
+  for (const run of origRuns) {
+    const runLen = run.text.length;
+    const runStart = origPos;
+    const runEnd = origPos + runLen;
+
+    // Build replacement text for this run's portion
+    // Walk the ops, accumulating what falls within this run's char range
+    let charCount = 0;
+    let newText = "";
+    let opOrigPos = 0; // tracks position in original text across ops
+
+    for (const op of ops) {
+      if (op.type === "same") {
+        const tokStart = opOrigPos;
+        const tokEnd = opOrigPos + op.a.length;
+        // Intersection with this run
+        if (tokEnd > runStart && tokStart < runEnd) {
+          const s = Math.max(tokStart, runStart) - tokStart;
+          const e = Math.min(tokEnd, runEnd) - tokStart;
+          newText += op.a.slice(s, e);
+        }
+        opOrigPos += op.a.length;
+      } else if (op.type === "del") {
+        // Deletion — just skip in original, don't add to newText
+        opOrigPos += op.a.length;
+      } else if (op.type === "ins") {
+        // Insertion — attribute to the run that owns this position in original
+        if (opOrigPos >= runStart && opOrigPos <= runEnd) {
+          newText += op.b;
         }
       }
-      slice = newText.slice(charPos, end);
-      charPos = end;
-      // Skip leading space in next slice
-      if (charPos < newText.length && newText[charPos] === " ") charPos++;
     }
 
-    const rPrMatch = run.full.match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
-    const rPr = rPrMatch ? rPrMatch[0] : "";
-    const newRun = slice
-      ? `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(slice)}</w:t></w:r>`
-      : `<w:r>${rPr}<w:t></w:t></w:r>`;
-
-    result = result.replace(run.full, newRun);
+    origPos = runEnd;
+    newRunTexts.push(newText);
   }
 
-  return result;
+  return newRunTexts;
+}
+
+// Core: replace <w:t> content in the XML with minimal changes
+// Never touches run structure, paragraph structure, or any formatting
+function applyReplacementsToXml(xml, paraReplacements) {
+  // paraReplacements: Map of paragraphText -> tailoredText
+
+  // Process paragraph by paragraph
+  return xml.replace(/<w:p[ >][\s\S]*?<\/w:p>/g, (paraXml) => {
+    // Extract all text nodes in this paragraph
+    const textNodes = extractTextNodes(paraXml);
+    if (textNodes.length === 0) return paraXml;
+
+    // Get the full paragraph text
+    const paraText = textNodes.map(n => n.text).join("");
+    const trimmed = paraText.trim();
+    if (!trimmed || trimmed.split(/\s+/).length < 4) return paraXml;
+
+    // Find if this paragraph has a replacement
+    const tailored = paraReplacements.get(trimmed);
+    if (!tailored || tailored === trimmed) return paraXml;
+
+    // Compute per-run new texts
+    const newTexts = computeRunReplacements(textNodes, tailored);
+
+    // Apply replacements: only update nodes whose text actually changed
+    let result = paraXml;
+    let offset = 0; // track position shifts from replacements
+
+    for (let i = 0; i < textNodes.length; i++) {
+      const node = textNodes[i];
+      const newText = newTexts[i];
+
+      if (newText === node.text) continue; // unchanged — leave it alone
+
+      // Build new <w:t> preserving the exact open tag (which may have xml:space="preserve")
+      const openTag = newText !== newText.trimStart() || newText !== newText.trimEnd()
+        ? node.openTag.includes('xml:space') ? node.openTag : node.openTag.replace('>', ' xml:space="preserve">')
+        : node.openTag;
+
+      const newNode = `${openTag}${escapeXml(newText)}${node.closeTag}`;
+
+      // Replace in result using adjusted position
+      const adjustedStart = node.start + offset;
+      const adjustedEnd = node.end + offset;
+      result = result.slice(0, adjustedStart) + newNode + result.slice(adjustedEnd);
+      offset += newNode.length - node.raw.length;
+    }
+
+    return result;
+  });
+}
+
+function similarity(a, b) {
+  if (!a || !b) return 0;
+  const aWords = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
+  const bWords = b.toLowerCase().split(/\s+/).filter(Boolean);
+  if (aWords.size === 0 || bWords.length === 0) return 0;
+  const common = bWords.filter(w => aWords.has(w)).length;
+  return (2 * common) / (aWords.size + bWords.length);
 }
 
 export async function injectTextIntoDocx(originalFile, originalText, tailoredText) {
@@ -113,16 +189,14 @@ export async function injectTextIntoDocx(originalFile, originalText, tailoredTex
   if (!docXmlFile) throw new Error("Not a valid docx file");
   const docXml = await docXmlFile.async("string");
 
+  // Build paragraph replacement map
   const origParas = originalText.split("\n").map(s => s.trim()).filter(Boolean);
   const tailParas = tailoredText.split("\n").map(s => s.trim()).filter(Boolean);
 
-  // Build replacement map
   const replacements = new Map();
   const usedTail = new Set();
 
   for (const orig of origParas) {
-    // Skip very short paragraphs — section headers, names, dates unlikely to need changes
-    // and short text risks false-positive matching
     if (orig.split(/\s+/).length < 4) continue;
 
     let bestIdx = -1, bestScore = 0;
@@ -131,42 +205,42 @@ export async function injectTextIntoDocx(originalFile, originalText, tailoredTex
       const score = similarity(orig, tailParas[j]);
       if (score > bestScore) { bestScore = score; bestIdx = j; }
     }
-    // Require score >= 0.5 to avoid false matches on short paragraphs
     if (bestIdx >= 0 && bestScore >= 0.5 && tailParas[bestIdx] !== orig) {
       replacements.set(orig, tailParas[bestIdx]);
       usedTail.add(bestIdx);
     }
   }
 
+  // Also do fuzzy matching against actual XML paragraph texts
+  // (mammoth extraction may differ slightly from raw XML text)
+  const xmlParaTexts = [];
+  const xmlParaRegex = /<w:p[ >][\s\S]*?<\/w:p>/g;
+  let xmlMatch;
+  while ((xmlMatch = xmlParaRegex.exec(docXml)) !== null) {
+    const nodes = extractTextNodes(xmlMatch[0]);
+    const text = nodes.map(n => n.text).join("").trim();
+    if (text && text.split(/\s+/).length >= 4) {
+      xmlParaTexts.push(text);
+    }
+  }
+
+  // For any XML paragraph not yet in replacements, try fuzzy match
+  for (const xmlText of xmlParaTexts) {
+    if (replacements.has(xmlText)) continue;
+    let bestOrig = null, bestScore = 0;
+    for (const [orig] of replacements.entries()) {
+      const score = similarity(xmlText, orig);
+      if (score > bestScore) { bestScore = score; bestOrig = orig; }
+    }
+    if (bestOrig && bestScore >= 0.85) {
+      replacements.set(xmlText, replacements.get(bestOrig));
+    }
+  }
+
   console.log(`[docxProcessor] ${replacements.size} paragraphs to replace`);
   if (replacements.size === 0) return arrayBuffer;
 
-  let modifiedXml = docXml;
-  let replaceCount = 0;
-
-  modifiedXml = modifiedXml.replace(/<w:p[ >][\s\S]*?<\/w:p>/g, (para) => {
-    const paraText = getParaText(para).trim();
-    if (!paraText) return para;
-    // Skip paragraphs with fewer than 4 words — headers, names, dates
-    if (paraText.split(/\s+/).length < 4) return para;
-
-    if (replacements.has(paraText)) {
-      replaceCount++;
-      return replaceParaContent(para, replacements.get(paraText));
-    }
-
-    // Fuzzy fallback
-    for (const [orig, repl] of replacements.entries()) {
-      if (similarity(paraText, orig) >= 0.78) {
-        replaceCount++;
-        return replaceParaContent(para, repl);
-      }
-    }
-
-    return para;
-  });
-
-  console.log(`[docxProcessor] Replaced ${replaceCount} paragraphs in XML`);
+  const modifiedXml = applyReplacementsToXml(docXml, replacements);
 
   zip.file("word/document.xml", modifiedXml);
 
