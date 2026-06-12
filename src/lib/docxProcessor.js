@@ -1,4 +1,3 @@
-// Extract plain text from docx using mammoth
 export async function extractTextFromDocx(file) {
   const mammoth = await import("mammoth");
   const arrayBuffer = await file.arrayBuffer();
@@ -6,7 +5,6 @@ export async function extractTextFromDocx(file) {
   return result.value.trim();
 }
 
-// Similarity score between two strings
 function similarity(a, b) {
   if (!a || !b) return 0;
   const aWords = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
@@ -16,7 +14,6 @@ function similarity(a, b) {
   return (2 * common) / (aWords.size + bWords.length);
 }
 
-// Escape XML special characters
 function escapeXml(str) {
   return str
     .replace(/&/g, "&amp;")
@@ -26,33 +23,82 @@ function escapeXml(str) {
     .replace(/'/g, "&apos;");
 }
 
-// Get all text from a paragraph's <w:t> elements
 function getParaText(paraXml) {
-  const matches = paraXml.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
-  return matches.map(m => m.replace(/<[^>]+>/g, "")).join("");
+  return (paraXml.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [])
+    .map(m => m.replace(/<[^>]+>/g, ""))
+    .join("");
 }
 
-// Replace all text content in a paragraph with new text,
-// keeping only the FIRST run's formatting and discarding the rest
+// Distribute new text across existing runs proportionally by character count.
+// This preserves all run formatting (bold, font, size, color) while updating content.
 function replaceParaContent(paraXml, newText) {
-  // Find first <w:r> run
-  const firstRunMatch = paraXml.match(/<w:r[ >][\s\S]*?<\/w:r>/);
-  if (!firstRunMatch) return paraXml; // No runs found, return unchanged
+  const runRegex = /<w:r[ >][\s\S]*?<\/w:r>/g;
+  const runs = [];
+  let match;
+  while ((match = runRegex.exec(paraXml)) !== null) {
+    const runText = (match[0].match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [])
+      .map(m => m.replace(/<[^>]+>/g, "")).join("");
+    runs.push({ full: match[0], text: runText, index: match.index });
+  }
 
-  const firstRun = firstRunMatch[0];
+  if (runs.length === 0) return paraXml;
 
-  // Extract run properties <w:rPr>...</w:rPr> from first run if present
-  const rPrMatch = firstRun.match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
-  const rPr = rPrMatch ? rPrMatch[0] : "";
+  // Filter to runs that actually have text content
+  const textRuns = runs.filter(r => r.text.length > 0);
+  if (textRuns.length === 0) return paraXml;
 
-  // Build a single new run with all the replacement text
-  const newRun = `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(newText)}</w:t></w:r>`;
+  const originalTotal = textRuns.reduce((s, r) => s + r.text.length, 0);
 
-  // Remove ALL existing runs from the paragraph
-  let result = paraXml.replace(/<w:r[ >][\s\S]*?<\/w:r>/g, "");
+  if (textRuns.length === 1) {
+    // Single text run — simple replacement
+    const run = textRuns[0];
+    const rPrMatch = run.full.match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
+    const rPr = rPrMatch ? rPrMatch[0] : "";
+    const newRun = `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(newText)}</w:t></w:r>`;
+    return paraXml.replace(run.full, newRun);
+  }
 
-  // Insert new run just before closing </w:p>
-  result = result.replace(/<\/w:p>/, `${newRun}</w:p>`);
+  // Multiple text runs — distribute new text proportionally
+  // Each run gets a slice of newText proportional to its original character share
+  let result = paraXml;
+  let charPos = 0;
+  const newLen = newText.length;
+
+  for (let i = 0; i < textRuns.length; i++) {
+    const run = textRuns[i];
+    const isLast = i === textRuns.length - 1;
+
+    let slice;
+    if (isLast) {
+      slice = newText.slice(charPos);
+    } else {
+      const proportion = run.text.length / originalTotal;
+      const charCount = Math.round(proportion * newLen);
+      // Snap to word boundary to avoid mid-word cuts
+      let end = charPos + charCount;
+      if (end < newText.length) {
+        const nextSpace = newText.indexOf(" ", end);
+        const prevSpace = newText.lastIndexOf(" ", end);
+        if (nextSpace !== -1 && prevSpace > charPos) {
+          end = (nextSpace - end) < (end - prevSpace) ? nextSpace : prevSpace;
+        } else if (nextSpace !== -1) {
+          end = nextSpace;
+        }
+      }
+      slice = newText.slice(charPos, end);
+      charPos = end;
+      // Skip leading space in next slice
+      if (charPos < newText.length && newText[charPos] === " ") charPos++;
+    }
+
+    const rPrMatch = run.full.match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
+    const rPr = rPrMatch ? rPrMatch[0] : "";
+    const newRun = slice
+      ? `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(slice)}</w:t></w:r>`
+      : `<w:r>${rPr}<w:t></w:t></w:r>`;
+
+    result = result.replace(run.full, newRun);
+  }
 
   return result;
 }
@@ -63,56 +109,55 @@ export async function injectTextIntoDocx(originalFile, originalText, tailoredTex
   const arrayBuffer = await originalFile.arrayBuffer();
   const zip = await JSZip.loadAsync(arrayBuffer);
 
-  // Get the document XML
   const docXmlFile = zip.file("word/document.xml");
   if (!docXmlFile) throw new Error("Not a valid docx file");
   const docXml = await docXmlFile.async("string");
 
-  // Build paragraph replacement map from diff
   const origParas = originalText.split("\n").map(s => s.trim()).filter(Boolean);
   const tailParas = tailoredText.split("\n").map(s => s.trim()).filter(Boolean);
 
-  // Match each original paragraph to its tailored counterpart
-  const replacements = new Map(); // origText → tailoredText
+  // Build replacement map
+  const replacements = new Map();
   const usedTail = new Set();
 
   for (const orig of origParas) {
+    // Skip very short paragraphs — section headers, names, dates unlikely to need changes
+    // and short text risks false-positive matching
+    if (orig.split(/\s+/).length < 4) continue;
+
     let bestIdx = -1, bestScore = 0;
     for (let j = 0; j < tailParas.length; j++) {
       if (usedTail.has(j)) continue;
       const score = similarity(orig, tailParas[j]);
       if (score > bestScore) { bestScore = score; bestIdx = j; }
     }
-    if (bestIdx >= 0 && bestScore >= 0.4 && tailParas[bestIdx] !== orig) {
+    // Require score >= 0.5 to avoid false matches on short paragraphs
+    if (bestIdx >= 0 && bestScore >= 0.5 && tailParas[bestIdx] !== orig) {
       replacements.set(orig, tailParas[bestIdx]);
       usedTail.add(bestIdx);
     }
   }
 
   console.log(`[docxProcessor] ${replacements.size} paragraphs to replace`);
+  if (replacements.size === 0) return arrayBuffer;
 
-  if (replacements.size === 0) {
-    console.warn("[docxProcessor] No replacements found — returning original");
-    return arrayBuffer;
-  }
-
-  // Process each <w:p> paragraph in the XML
   let modifiedXml = docXml;
   let replaceCount = 0;
 
   modifiedXml = modifiedXml.replace(/<w:p[ >][\s\S]*?<\/w:p>/g, (para) => {
     const paraText = getParaText(para).trim();
     if (!paraText) return para;
+    // Skip paragraphs with fewer than 4 words — headers, names, dates
+    if (paraText.split(/\s+/).length < 4) return para;
 
-    // Direct match first
     if (replacements.has(paraText)) {
       replaceCount++;
       return replaceParaContent(para, replacements.get(paraText));
     }
 
-    // Fuzzy match: find if any replacement key is similar enough
+    // Fuzzy fallback
     for (const [orig, repl] of replacements.entries()) {
-      if (similarity(paraText, orig) >= 0.75) {
+      if (similarity(paraText, orig) >= 0.78) {
         replaceCount++;
         return replaceParaContent(para, repl);
       }
@@ -123,14 +168,11 @@ export async function injectTextIntoDocx(originalFile, originalText, tailoredTex
 
   console.log(`[docxProcessor] Replaced ${replaceCount} paragraphs in XML`);
 
-  // Save modified XML back into zip
   zip.file("word/document.xml", modifiedXml);
 
-  const result = await zip.generateAsync({
+  return await zip.generateAsync({
     type: "arraybuffer",
     compression: "DEFLATE",
     compressionOptions: { level: 6 },
   });
-
-  return result; 
 }

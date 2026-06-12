@@ -16,40 +16,37 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing resumeText or jd" });
     }
 
-    // Measure original document size
     const originalLines = resumeText.split("\n");
     const originalWordCount = resumeText.split(/\s+/).filter(Boolean).length;
-    const originalCharCount = resumeText.length;
+
+    // Build per-paragraph character budget
+    const paraLimits = originalLines
+      .map((line, i) => `Line ${i+1} (max ${line.length} chars): ${line}`)
+      .join("\n");
 
     const systemPrompt = `You are a precise resume tailoring assistant.
 
-DOCUMENT SIZE CONSTRAINT — THIS IS THE MOST IMPORTANT RULE:
-The original resume has exactly ${originalLines.length} lines, ${originalWordCount} words, and ${originalCharCount} characters.
-Your output MUST have the same number of lines (±2 max).
-Your output MUST have a similar word count (±30 words max).
-Do NOT add new bullet points, new sentences, or expand existing ones.
-If you add a word somewhere, remove a word elsewhere in the same paragraph to compensate.
-Think of it as a fixed-size container — you are swapping words, not adding content.
+HARD CONSTRAINTS — MUST BE FOLLOWED EXACTLY:
+1. Output must have EXACTLY ${originalLines.length} lines — same as input
+2. Each output line must be EQUAL OR SHORTER in character count than the input line
+3. Total word count must stay within ±20 words of the original (${originalWordCount} words)
+4. NEVER add new sentences, bullet points, or expand existing ones
+5. If you cannot improve a line without exceeding its character limit, return it UNCHANGED
 
 TAILORING RULES:
-- Preserve at least 80% of the text verbatim
 - NEVER change: name, companies, job titles, dates, education, certifications, contact info
-- ONLY modify: professional summary keywords, skills section keywords, and selective word swaps in bullet points (action verbs, tech keywords)
-- Do NOT fabricate skills or experience not already present
-- Mirror the JD language only where it genuinely maps to existing experience
-- Keep the same tone and writing style
+- ONLY swap individual keywords/phrases within existing lines
+- Mirror JD language only where it maps directly to existing experience
+- Same tone, same voice
 
-OUTPUT FORMAT:
-- Return ONLY the modified resume text
-- Preserve all paragraph and line breaks exactly as in the input — same number of lines
-- No commentary, no markdown, no explanations`;
+OUTPUT: Return ONLY the resume text. No commentary. No markdown. Exact same line count as input.`;
 
-    const userPrompt = `Resume to tailor (${originalLines.length} lines, ${originalWordCount} words — output must match this size):
+    const userPrompt = `Tailor this resume for the job description below.
+Each line has a character limit — do NOT exceed it.
 
-${resumeText}
+${paraLimits}
 
-Job description:
-
+JOB DESCRIPTION:
 ${jd}`;
 
     const model = client.getGenerativeModel({
@@ -58,32 +55,38 @@ ${jd}`;
     });
 
     const response = await model.generateContent(userPrompt);
-    let tailoredText = response.response.text();
+    let tailoredText = response.response.text().trim();
 
-    // Server-side safety net: enforce line count
-    const tailoredLines = tailoredText.split("\n");
+    // Server-side enforcement: check every line against original char count
     const origLines = resumeText.split("\n");
+    const tailLines = tailoredText.split("\n");
 
-    // If line count drifted by more than 3, trim or pad to match
-    if (Math.abs(tailoredLines.length - origLines.length) > 3) {
-      if (tailoredLines.length > origLines.length) {
-        // Trim extra lines from the end
-        tailoredText = tailoredLines.slice(0, origLines.length).join("\n");
+    // If line count drifted, trim or pad
+    while (tailLines.length > origLines.length) tailLines.pop();
+    while (tailLines.length < origLines.length) tailLines.push(origLines[tailLines.length]);
+
+    // Enforce per-line char limit
+    const corrected = origLines.map((origLine, i) => {
+      const tailLine = tailLines[i] ?? origLine;
+      // If tailored line exceeds original length by more than 5 chars, revert
+      if (tailLine.length > origLine.length + 5) {
+        return origLine;
       }
-    }
+      return tailLine;
+    });
 
-    // Verify word count didn't explode
+    tailoredText = corrected.join("\n");
+
     const tailoredWordCount = tailoredText.split(/\s+/).filter(Boolean).length;
-    const wordDrift = tailoredWordCount - originalWordCount;
 
     return res.status(200).json({
       tailoredText,
       stats: {
         originalLines: origLines.length,
-        tailoredLines: tailoredText.split("\n").length,
+        tailoredLines: corrected.length,
         originalWords: originalWordCount,
         tailoredWords: tailoredWordCount,
-        wordDrift,
+        wordDrift: tailoredWordCount - originalWordCount,
       }
     });
   } catch (err) {
