@@ -21,6 +21,24 @@ function diffWords(a, b) {
   return ops;
 }
 
+// Classify a change as "semantic" or "cosmetic"
+// Cosmetic: only whitespace, punctuation, ampersand/and swaps, capitalisation
+function classifyChange(orig, tail) {
+  // Normalize: collapse whitespace, replace & with and, lowercase
+  const normalize = s => s
+    .replace(/\s+/g, " ")
+    .replace(/&/g, "and")
+    .replace(/[|,;]/g, " ")
+    .replace(/[~<>]/g, "")
+    .toLowerCase()
+    .trim();
+  if (normalize(orig) === normalize(tail)) return "cosmetic";
+  // Check if only non-word characters differ
+  const stripPunct = s => s.replace(/[^a-zA-Z0-9\s]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (stripPunct(orig) === stripPunct(tail)) return "cosmetic";
+  return "semantic";
+}
+
 function computeDiff(originalText, tailoredText) {
   const origLines = originalText.split("\n").map(s => s.trim()).filter(Boolean);
   const tailLines = tailoredText.split("\n").map(s => s.trim()).filter(Boolean);
@@ -34,7 +52,8 @@ function computeDiff(originalText, tailoredText) {
       if (orig) results.push({ type: "same", original: orig, tailored: orig });
       continue;
     }
-    results.push({ type: "changed", original: orig, tailored: tail, ops: diffWords(orig, tail) });
+    const changeType = classifyChange(orig, tail);
+    results.push({ type: "changed", changeType, original: orig, tailored: tail, ops: diffWords(orig, tail) });
   }
   return results;
 }
@@ -63,9 +82,9 @@ function MatchScore({ score }) {
         <text x="36" y="41" textAnchor="middle" fill={color} fontSize="16" fontWeight="700">{score}%</text>
       </svg>
       <div>
-        <div style={{ fontSize: "14px", fontWeight: 600, color: "#e8e8e8" }}>ATS Match</div>
+        <div style={{ fontSize: "14px", fontWeight: 600, color: "#e8e8e8" }}>JD Match</div>
         <div style={{ fontSize: "12px", color: "#666", marginTop: "2px" }}>
-          {score >= 75 ? "Strong match" : score >= 50 ? "Moderate match" : "Weak match"}
+          {score >= 75 ? "Strong fit for this role" : score >= 50 ? "Moderate fit for this role" : "Weak fit for this role"}
         </div>
       </div>
     </div>
@@ -265,7 +284,8 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
   const [buildError, setBuildError] = useState("");
 
   const diff = computeDiff(originalText, tailoredText);
-  const changedCount = diff.filter(d => d.type === "changed").length;
+  const changedCount = diff.filter(d => d.type === "changed" && d.changeType === "semantic").length;
+  const cosmeticCount = diff.filter(d => d.type === "changed" && d.changeType === "cosmetic").length;
   const totalOrig = diff.filter(d => d.type !== "added").length;
   const preservedPct = totalOrig > 0 ? Math.round(((totalOrig - changedCount) / totalOrig) * 100) : 100;
 
@@ -308,7 +328,8 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
     <div className="result-panel">
       <div className="result-header">
         <div className="result-meta">
-          <span className="badge">{changedCount} line{changedCount !== 1 ? "s" : ""} changed</span>
+          <span className="badge">{changedCount} content change{changedCount !== 1 ? "s" : ""}</span>
+          {cosmeticCount > 0 && <span className="badge-sub">{cosmeticCount} formatting</span>}
           <span className="badge-sub">{preservedPct}% preserved</span>
           {tailorStats && Math.abs(tailorStats.wordDrift) > 0 && (
             <span className="badge-sub" style={{ color: Math.abs(tailorStats.wordDrift) > 30 ? "#ff8a8a" : "#666" }}>
@@ -348,24 +369,50 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
         <div className="diff-view">
           {diff.filter(d => d.type === "changed").length === 0 ? (
             <p className="no-changes">No changes — resume already matches the JD well.</p>
-          ) : (
-            diff.filter(d => d.type === "changed").map((entry, i) => (
-              <div key={i} style={{ border: "1px solid #2a2a2a", borderRadius: "8px", overflow: "hidden", marginBottom: "14px" }}>
+          ) : (() => {
+            const semantic = diff.filter(d => d.type === "changed" && d.changeType === "semantic");
+            const cosmetic = diff.filter(d => d.type === "changed" && d.changeType === "cosmetic");
+
+            const renderBlock = (entry, i) => (
+              <div key={i} style={{ border: "1px solid #2a2a2a", borderRadius: "8px", overflow: "hidden", marginBottom: "12px" }}>
                 <div style={{ background: "rgba(255,60,60,0.07)", borderBottom: "1px solid #2a2a2a" }}>
                   <div style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", padding: "5px 14px", color: "#ff6b6b", background: "rgba(255,60,60,0.1)" }}>Before</div>
-                  <div style={{ padding: "10px 14px", fontSize: "13px", lineHeight: 1.65, color: "#bbb", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                    {renderOps(entry.ops, "del")}
-                  </div>
+                  <div style={{ padding: "10px 14px", fontSize: "13px", lineHeight: 1.65, color: "#bbb", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{renderOps(entry.ops, "del")}</div>
                 </div>
                 <div style={{ background: "rgba(50,200,100,0.06)" }}>
                   <div style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", padding: "5px 14px", color: "#4ddb8a", background: "rgba(50,200,100,0.1)" }}>After</div>
-                  <div style={{ padding: "10px 14px", fontSize: "13px", lineHeight: 1.65, color: "#ddd", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                    {renderOps(entry.ops, "add")}
-                  </div>
+                  <div style={{ padding: "10px 14px", fontSize: "13px", lineHeight: 1.65, color: "#ddd", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{renderOps(entry.ops, "add")}</div>
                 </div>
               </div>
-            ))
-          )}
+            );
+
+            return (
+              <>
+                {semantic.length > 0 && (
+                  <div style={{ marginBottom: "24px" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#c8f064", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span>Content changes</span>
+                      <span style={{ background: "rgba(200,240,100,0.12)", color: "#c8f064", borderRadius: "10px", padding: "1px 8px", fontSize: "10px" }}>{semantic.length}</span>
+                    </div>
+                    {semantic.map(renderBlock)}
+                  </div>
+                )}
+                {cosmetic.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#555", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}
+                      onClick={e => { const el = e.currentTarget.nextSibling; el.style.display = el.style.display === "none" ? "block" : "none"; }}>
+                      <span>Formatting & punctuation</span>
+                      <span style={{ background: "#222", color: "#555", borderRadius: "10px", padding: "1px 8px", fontSize: "10px" }}>{cosmetic.length}</span>
+                      <span style={{ fontSize: "10px", color: "#444" }}>click to toggle</span>
+                    </div>
+                    <div style={{ display: "none" }}>
+                      {cosmetic.map(renderBlock)}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       ) : (
         <RecommendationsPanel originalText={originalText} tailoredText={tailoredText} jd={jd} />
