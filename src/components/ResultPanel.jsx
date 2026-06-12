@@ -69,7 +69,7 @@ function computeParagraphDiff(originalText, tailoredText) {
   return results;
 }
 
-export default function ResultPanel({ originalText, tailoredText, originalFile, onReset }) {
+export default function ResultPanel({ originalText, tailoredText, originalFile, tailorStats, onReset }) {
   const [view, setView] = useState("diff");
   const [building, setBuilding] = useState(false);
   const [docxUrl, setDocxUrl] = useState(null);
@@ -112,8 +112,10 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
   async function handleOpenGoogleDocs() {
     const url = await buildDocx();
     if (!url) return;
-    triggerDownload(url, originalFile.name.replace(/\.(docx|doc)$/i, "") + "-tailored.docx");
-    setTimeout(() => window.open("https://docs.google.com/", "_blank"), 500);
+    const filename = originalFile.name.replace(/\.(docx|doc)$/i, "") + "-tailored.docx";
+    triggerDownload(url, filename);
+    // Open Google Drive upload page — user can drag the downloaded file straight in
+    setTimeout(() => window.open("https://drive.google.com/drive/u/0/my-drive", "_blank"), 700);
   }
 
   function renderOps(ops, side) {
@@ -154,6 +156,14 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
         <div className="result-meta">
           <span className="badge">{changedCount} paragraph{changedCount !== 1 ? "s" : ""} changed</span>
           <span className="badge-sub">{preservedPct}% preserved</span>
+          {tailorStats && (
+            <span className="badge-sub" style={{
+              color: Math.abs(tailorStats.wordDrift) > 30 ? "#ff8a8a" : "#888",
+              fontSize: "11px"
+            }}>
+              {tailorStats.wordDrift > 0 ? "+" : ""}{tailorStats.wordDrift} words
+            </span>
+          )}
         </div>
         <div className="result-actions">
           <button className="btn-ghost" onClick={onReset}>← New resume</button>
@@ -169,7 +179,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
         <button className="btn-gdocs" onClick={handleOpenGoogleDocs} disabled={building}>
           Open in Google Docs
         </button>
-        <span className="gdocs-hint">Download → upload to Google Docs → export as PDF</span>
+        <span className="gdocs-hint">Downloads file · opens Google Drive → drag file in → open as Docs → export PDF</span>
       </div>
 
       {buildError && <p className="error-msg" style={{ margin: "0 20px 16px" }}>{buildError}</p>}

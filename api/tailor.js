@@ -16,24 +16,35 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing resumeText or jd" });
     }
 
-    const systemPrompt = `You are a precise resume tailoring assistant. You will receive a resume as plain text (extracted from a Word document) and a job description.
+    // Measure original document size
+    const originalLines = resumeText.split("\n");
+    const originalWordCount = resumeText.split(/\s+/).filter(Boolean).length;
+    const originalCharCount = resumeText.length;
 
-YOUR JOB:
-- Make minimal, surgical changes to tailor the resume to the job description
+    const systemPrompt = `You are a precise resume tailoring assistant.
+
+DOCUMENT SIZE CONSTRAINT — THIS IS THE MOST IMPORTANT RULE:
+The original resume has exactly ${originalLines.length} lines, ${originalWordCount} words, and ${originalCharCount} characters.
+Your output MUST have the same number of lines (±2 max).
+Your output MUST have a similar word count (±30 words max).
+Do NOT add new bullet points, new sentences, or expand existing ones.
+If you add a word somewhere, remove a word elsewhere in the same paragraph to compensate.
+Think of it as a fixed-size container — you are swapping words, not adding content.
+
+TAILORING RULES:
 - Preserve at least 80% of the text verbatim
-- Only modify: professional summary/objective, skills keywords, and up to 2-3 action verb/keyword tweaks per role's bullet points
-- NEVER change: names, companies, job titles, dates, education, certifications, contact info
+- NEVER change: name, companies, job titles, dates, education, certifications, contact info
+- ONLY modify: professional summary keywords, skills section keywords, and selective word swaps in bullet points (action verbs, tech keywords)
 - Do NOT fabricate skills or experience not already present
-- Mirror the JD's language where it genuinely matches existing experience
+- Mirror the JD language only where it genuinely maps to existing experience
 - Keep the same tone and writing style
 
 OUTPUT FORMAT:
 - Return ONLY the modified resume text
-- Preserve all paragraph breaks exactly as in the input
-- No commentary, no markdown, no explanations
-- The paragraph count must match the input exactly`;
+- Preserve all paragraph and line breaks exactly as in the input — same number of lines
+- No commentary, no markdown, no explanations`;
 
-    const userPrompt = `Resume to tailor:
+    const userPrompt = `Resume to tailor (${originalLines.length} lines, ${originalWordCount} words — output must match this size):
 
 ${resumeText}
 
@@ -47,9 +58,34 @@ ${jd}`;
     });
 
     const response = await model.generateContent(userPrompt);
-    const tailoredText = response.response.text();
+    let tailoredText = response.response.text();
 
-    return res.status(200).json({ tailoredText });
+    // Server-side safety net: enforce line count
+    const tailoredLines = tailoredText.split("\n");
+    const origLines = resumeText.split("\n");
+
+    // If line count drifted by more than 3, trim or pad to match
+    if (Math.abs(tailoredLines.length - origLines.length) > 3) {
+      if (tailoredLines.length > origLines.length) {
+        // Trim extra lines from the end
+        tailoredText = tailoredLines.slice(0, origLines.length).join("\n");
+      }
+    }
+
+    // Verify word count didn't explode
+    const tailoredWordCount = tailoredText.split(/\s+/).filter(Boolean).length;
+    const wordDrift = tailoredWordCount - originalWordCount;
+
+    return res.status(200).json({
+      tailoredText,
+      stats: {
+        originalLines: origLines.length,
+        tailoredLines: tailoredText.split("\n").length,
+        originalWords: originalWordCount,
+        tailoredWords: tailoredWordCount,
+        wordDrift,
+      }
+    });
   } catch (err) {
     console.error("Tailor error:", err);
     return res.status(500).json({ error: err.message });
