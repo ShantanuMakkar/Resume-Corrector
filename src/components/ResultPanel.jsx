@@ -52,7 +52,16 @@ function computeParagraphDiff(originalText, tailoredText) {
       if (score > bestScore) { bestScore = score; bestIdx = j; }
     }
 
-    if (bestIdx === -1 || bestScore < 0.4) {
+    // If no good match in window, search the full list
+    if (bestScore < 0.3) {
+      for (let j = 0; j < tailParas.length; j++) {
+        if (usedTail.has(j)) continue;
+        const score = similarity(orig, tailParas[j]);
+        if (score > bestScore) { bestScore = score; bestIdx = j; }
+      }
+    }
+
+    if (bestIdx === -1 || bestScore < 0.25) {
       results.push({ type: "same", original: orig, tailored: orig });
     } else {
       const tail = tailParas[bestIdx];
