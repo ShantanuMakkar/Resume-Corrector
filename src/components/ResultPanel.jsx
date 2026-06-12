@@ -31,47 +31,23 @@ function similarity(a, b) {
   return (2 * common) / (aWords.size + bWords.length);
 }
 
-// Order-aware paragraph diff — matches paragraphs positionally with a window
+// Positional diff — since both original and tailored use the same XML paragraph
+// boundaries, we match line i to line i directly
 function computeParagraphDiff(originalText, tailoredText) {
   const origParas = originalText.split("\n").map(s => s.trim()).filter(Boolean);
   const tailParas = tailoredText.split("\n").map(s => s.trim()).filter(Boolean);
   const results = [];
-  const usedTail = new Set();
+  const maxLen = Math.max(origParas.length, tailParas.length);
 
-  for (let i = 0; i < origParas.length; i++) {
-    const orig = origParas[i];
-    // Estimate position in tailored proportionally, search within ±5 window
-    const approxIdx = Math.round((i / origParas.length) * tailParas.length);
-    const start = Math.max(0, approxIdx - 5);
-    const end = Math.min(tailParas.length - 1, approxIdx + 5);
-
-    let bestIdx = -1, bestScore = 0;
-    for (let j = start; j <= end; j++) {
-      if (usedTail.has(j)) continue;
-      const score = similarity(orig, tailParas[j]);
-      if (score > bestScore) { bestScore = score; bestIdx = j; }
+  for (let i = 0; i < maxLen; i++) {
+    const orig = origParas[i] ?? "";
+    const tail = tailParas[i] ?? "";
+    if (!orig && !tail) continue;
+    if (orig === tail || !orig || !tail) {
+      if (orig) results.push({ type: "same", original: orig, tailored: orig });
+      continue;
     }
-
-    // If no good match in window, search the full list
-    if (bestScore < 0.3) {
-      for (let j = 0; j < tailParas.length; j++) {
-        if (usedTail.has(j)) continue;
-        const score = similarity(orig, tailParas[j]);
-        if (score > bestScore) { bestScore = score; bestIdx = j; }
-      }
-    }
-
-    if (bestIdx === -1 || bestScore < 0.25) {
-      results.push({ type: "same", original: orig, tailored: orig });
-    } else {
-      const tail = tailParas[bestIdx];
-      usedTail.add(bestIdx);
-      if (orig === tail) {
-        results.push({ type: "same", original: orig, tailored: tail });
-      } else {
-        results.push({ type: "changed", original: orig, tailored: tail, ops: diffWords(orig, tail) });
-      }
-    }
+    results.push({ type: "changed", original: orig, tailored: tail, ops: diffWords(orig, tail) });
   }
 
   return results;

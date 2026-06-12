@@ -1,33 +1,3 @@
-// Extract text directly from XML paragraph by paragraph
-// This ensures extraction order matches injection order exactly
-async function extractXmlParas(arrayBuffer) {
-  const JSZip = (await import("jszip")).default;
-  const zip = await JSZip.loadAsync(arrayBuffer);
-  const docXml = await zip.file("word/document.xml").async("string");
-
-  const paras = [];
-  const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g;
-  let match;
-  while ((match = paraRegex.exec(docXml)) !== null) {
-    const text = decodeXml(
-      (match[0].match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [])
-        .map(m => m.replace(/<[^>]+>/g, ""))
-        .join("")
-    ).trim();
-    paras.push(text);
-  }
-  return paras;
-}
-
-// Public: extract resume text for display and sending to AI
-// Uses mammoth for readable output (handles tables, lists etc nicely)
-export async function extractTextFromDocx(file) {
-  const mammoth = await import("mammoth");
-  const arrayBuffer = await file.arrayBuffer();
-  const result = await mammoth.extractRawText({ arrayBuffer });
-  return result.value.trim();
-}
-
 function escapeXml(str) {
   return str
     .replace(/&/g, "&amp;")
@@ -63,6 +33,30 @@ function extractTextNodes(xml) {
   return nodes;
 }
 
+// Extract text directly from XML paragraphs — single source of truth
+// Returns array of { paraText, xmlPara } in document order
+function extractXmlParagraphs(docXml) {
+  const result = [];
+  const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g;
+  let match;
+  while ((match = paraRegex.exec(docXml)) !== null) {
+    const nodes = extractTextNodes(match[0]);
+    const text = nodes.map(n => n.text).join("").trim();
+    result.push({ text, xml: match[0] });
+  }
+  return result;
+}
+
+// Build plain text from XML paragraphs (for sending to AI)
+// Joins non-empty paragraphs with newlines
+export function buildResumeText(docXml) {
+  const paras = extractXmlParagraphs(docXml);
+  return paras
+    .map(p => p.text)
+    .filter(Boolean)
+    .join("\n");
+}
+
 // Word-level LCS diff
 function diffWords(a, b) {
   const at = a.split(/(\s+)/).filter(Boolean);
@@ -84,14 +78,25 @@ function diffWords(a, b) {
   return ops;
 }
 
-// Distribute new text across existing <w:t> nodes using word-level diff
-// Only changes nodes whose text actually changed — never touches run structure
-function applyTextToNodes(nodes, origParaText, newParaText) {
-  if (origParaText === newParaText) return null; // nothing to do
+function similarity(a, b) {
+  if (!a || !b) return 0;
+  const aWords = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
+  const bWords = b.toLowerCase().split(/\s+/).filter(Boolean);
+  if (aWords.size === 0 || bWords.length === 0) return 0;
+  const common = bWords.filter(w => aWords.has(w)).length;
+  return (2 * common) / (aWords.size + bWords.length);
+}
 
-  const ops = diffWords(origParaText, newParaText);
+// Apply new text into a paragraph's <w:t> nodes using word-level diff
+function applyTextToPara(paraXml, origText, newText) {
+  if (origText === newText) return paraXml;
 
-  // Reconstruct per-node text by tracking original char position
+  const nodes = extractTextNodes(paraXml);
+  if (nodes.length === 0) return paraXml;
+
+  const ops = diffWords(origText, newText);
+
+  // Distribute new text across nodes by tracking original char position
   let origPos = 0;
   const newNodeTexts = nodes.map(node => {
     const runStart = origPos;
@@ -118,50 +123,45 @@ function applyTextToNodes(nodes, origParaText, newParaText) {
         }
       }
     }
-
     return newText;
   });
 
-  return newNodeTexts;
+  // Apply only changed nodes
+  let result = paraXml;
+  let offset = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const newNodeText = newNodeTexts[i];
+    if (newNodeText === node.text) continue;
+
+    const openTag = (newNodeText !== newNodeText.trim())
+      ? (node.openTag.includes('xml:space') ? node.openTag : node.openTag.replace('>', ' xml:space="preserve">'))
+      : node.openTag;
+
+    const newNode = `${openTag}${escapeXml(newNodeText)}${node.closeTag}`;
+    const s = node.start + offset;
+    const e = node.end + offset;
+    result = result.slice(0, s) + newNode + result.slice(e);
+    offset += newNode.length - node.raw.length;
+  }
+  return result;
 }
 
-// Apply replacement map directly to XML — only touching <w:t> content
-function applyReplacementsToXml(xml, replacements) {
-  return xml.replace(/<w:p[ >][\s\S]*?<\/w:p>/g, (paraXml) => {
-    const nodes = extractTextNodes(paraXml);
-    if (nodes.length === 0) return paraXml;
+// Extract docx and return { arrayBuffer, docXml, resumeText }
+// resumeText is built from XML directly — same paragraph boundaries as injection
+export async function extractDocx(file) {
+  const JSZip = (await import("jszip")).default;
+  const arrayBuffer = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const docXml = await zip.file("word/document.xml").async("string");
+  const resumeText = buildResumeText(docXml);
+  return { arrayBuffer, docXml, resumeText };
+}
 
-    const paraText = nodes.map(n => n.text).join("").trim();
-    if (!paraText || paraText.split(/\s+/).length < 4) return paraXml;
-
-    const replacement = replacements.get(paraText);
-    if (!replacement) return paraXml;
-
-    const newTexts = applyTextToNodes(nodes, paraText, replacement);
-    if (!newTexts) return paraXml;
-
-    // Apply replacements surgically — only update changed nodes
-    let result = paraXml;
-    let offset = 0;
-
-    for (let i = 0; i < nodes.length; i++) {
-      const node = nodes[i];
-      const newText = newTexts[i];
-      if (newText === node.text) continue;
-
-      const openTag = (newText !== newText.trim())
-        ? (node.openTag.includes('xml:space') ? node.openTag : node.openTag.replace('>', ' xml:space="preserve">'))
-        : node.openTag;
-
-      const newNode = `${openTag}${escapeXml(newText)}${node.closeTag}`;
-      const s = node.start + offset;
-      const e = node.end + offset;
-      result = result.slice(0, s) + newNode + result.slice(e);
-      offset += newNode.length - node.raw.length;
-    }
-
-    return result;
-  });
+// Keep mammoth extraction as fallback for display if needed
+export async function extractTextFromDocx(file) {
+  const { resumeText } = await extractDocx(file);
+  return resumeText;
 }
 
 export async function injectTextIntoDocx(originalFile, originalText, tailoredText) {
@@ -173,82 +173,59 @@ export async function injectTextIntoDocx(originalFile, originalText, tailoredTex
   if (!docXmlFile) throw new Error("Not a valid docx file");
   const docXml = await docXmlFile.async("string");
 
-  // Extract paragraphs directly from XML — same source as injection
-  // This guarantees text matches exactly, no mammoth interpretation differences
-  const xmlParas = [];
-  const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g;
-  let m;
-  while ((m = paraRegex.exec(docXml)) !== null) {
-    const nodes = extractTextNodes(m[0]);
-    const text = nodes.map(n => n.text).join("").trim();
-    if (text) xmlParas.push(text);
-  }
+  // Extract paragraphs from XML — guaranteed same order/boundaries as originalText
+  const xmlParas = extractXmlParagraphs(docXml);
 
-  // Split tailored text into paragraphs
-  const tailParas = tailoredText.split("\n").map(s => s.trim()).filter(Boolean);
+  // Split original and tailored by newline — same paragraph boundaries
+  const origLines = originalText.split("\n").map(s => s.trim());
+  const tailLines = tailoredText.split("\n").map(s => s.trim());
 
-  // Match XML paragraphs to tailored paragraphs using exact + fuzzy matching
-  // We match in ORDER — the AI returns paragraphs in the same order as the original
+  // Build replacement map: xmlParaText -> tailoredText
+  // Match positionally — origLines[i] should correspond to xmlParas[i]
+  // since both come from the same XML extraction
   const replacements = new Map();
 
-  // First pass: exact matches
-  const usedTail = new Set();
-  for (const xmlPara of xmlParas) {
-    if (xmlPara.split(/\s+/).length < 4) continue;
-    const idx = tailParas.findIndex((t, i) => !usedTail.has(i) && t === xmlPara);
-    if (idx !== -1) {
-      usedTail.add(idx);
-      // exact match — no change needed
-    }
-  }
-
-  // Second pass: match changed paragraphs in order
-  // For each XML para, find the closest tailored para not yet used
-  // Use ORDER-AWARE matching — only look within a window around the same position
-  const usedTail2 = new Set();
+  let tailIdx = 0;
   for (let i = 0; i < xmlParas.length; i++) {
-    const xmlPara = xmlParas[i];
-    if (xmlPara.split(/\s+/).length < 4) continue;
+    const xmlText = xmlParas[i].text;
+    if (!xmlText || xmlText.split(/\s+/).length < 4) continue;
 
-    // Estimate corresponding position in tailored (proportional)
-    const approxIdx = Math.round((i / xmlParas.length) * tailParas.length);
-    const windowSize = 5; // look ±5 around expected position
-    const start = Math.max(0, approxIdx - windowSize);
-    const end = Math.min(tailParas.length - 1, approxIdx + windowSize);
+    // Find matching origLine for this xmlPara
+    const origIdx = origLines.findIndex(l => l === xmlText);
+    if (origIdx === -1) continue;
 
-    let bestIdx = -1, bestScore = 0;
-    for (let j = start; j <= end; j++) {
-      if (usedTail2.has(j)) continue;
-      const score = similarity(xmlPara, tailParas[j]);
-      if (score > bestScore) { bestScore = score; bestIdx = j; }
-    }
-
-    if (bestIdx >= 0 && bestScore >= 0.5 && tailParas[bestIdx] !== xmlPara) {
-      replacements.set(xmlPara, tailParas[bestIdx]);
-      usedTail2.add(bestIdx);
-    } else if (bestIdx >= 0) {
-      usedTail2.add(bestIdx); // mark as used even if unchanged
+    // Find corresponding tailored line at same position
+    const tailLine = tailLines[origIdx];
+    if (tailLine && tailLine !== xmlText) {
+      replacements.set(xmlText, tailLine);
     }
   }
 
   console.log(`[docxProcessor] ${replacements.size} paragraphs to replace`);
   if (replacements.size === 0) return arrayBuffer;
 
-  const modifiedXml = applyReplacementsToXml(docXml, replacements);
-  zip.file("word/document.xml", modifiedXml);
+  // Apply replacements to XML
+  let modifiedXml = docXml;
+  let replaceCount = 0;
 
+  modifiedXml = modifiedXml.replace(/<w:p[ >][\s\S]*?<\/w:p>/g, (paraXml) => {
+    const nodes = extractTextNodes(paraXml);
+    const paraText = nodes.map(n => n.text).join("").trim();
+    if (!paraText) return paraXml;
+
+    const replacement = replacements.get(paraText);
+    if (!replacement) return paraXml;
+
+    replaceCount++;
+    return applyTextToPara(paraXml, paraText, replacement);
+  });
+
+  console.log(`[docxProcessor] Replaced ${replaceCount} paragraphs`);
+
+  zip.file("word/document.xml", modifiedXml);
   return await zip.generateAsync({
     type: "arraybuffer",
     compression: "DEFLATE",
     compressionOptions: { level: 6 },
   });
-}
-
-function similarity(a, b) {
-  if (!a || !b) return 0;
-  const aWords = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
-  const bWords = b.toLowerCase().split(/\s+/).filter(Boolean);
-  if (aWords.size === 0 || bWords.length === 0) return 0;
-  const common = bWords.filter(w => aWords.has(w)).length;
-  return (2 * common) / (aWords.size + bWords.length);
 }

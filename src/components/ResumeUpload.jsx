@@ -1,11 +1,5 @@
 import { useRef, useState } from "react";
-
-async function extractTextFromDocx(file) {
-  const mammoth = await import("mammoth");
-  const arrayBuffer = await file.arrayBuffer();
-  const result = await mammoth.extractRawText({ arrayBuffer });
-  return result.value.trim();
-}
+import { extractTextFromDocx } from "../lib/docxProcessor";
 
 export default function ResumeUpload({ file, onFile }) {
   const inputRef = useRef();
