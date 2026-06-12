@@ -31,7 +31,7 @@ function similarity(a, b) {
   return (2 * common) / (aWords.size + bWords.length);
 }
 
-// Match original paragraphs to tailored paragraphs by similarity
+// Order-aware paragraph diff — matches paragraphs positionally with a window
 function computeParagraphDiff(originalText, tailoredText) {
   const origParas = originalText.split("\n").map(s => s.trim()).filter(Boolean);
   const tailParas = tailoredText.split("\n").map(s => s.trim()).filter(Boolean);
@@ -40,15 +40,20 @@ function computeParagraphDiff(originalText, tailoredText) {
 
   for (let i = 0; i < origParas.length; i++) {
     const orig = origParas[i];
+    // Estimate position in tailored proportionally, search within ±5 window
+    const approxIdx = Math.round((i / origParas.length) * tailParas.length);
+    const start = Math.max(0, approxIdx - 5);
+    const end = Math.min(tailParas.length - 1, approxIdx + 5);
+
     let bestIdx = -1, bestScore = 0;
-    for (let j = 0; j < tailParas.length; j++) {
+    for (let j = start; j <= end; j++) {
       if (usedTail.has(j)) continue;
       const score = similarity(orig, tailParas[j]);
       if (score > bestScore) { bestScore = score; bestIdx = j; }
     }
 
-    if (bestIdx === -1 || bestScore < 0.3) {
-      results.push({ type: "removed", original: orig, tailored: "" });
+    if (bestIdx === -1 || bestScore < 0.4) {
+      results.push({ type: "same", original: orig, tailored: orig });
     } else {
       const tail = tailParas[bestIdx];
       usedTail.add(bestIdx);
@@ -57,12 +62,6 @@ function computeParagraphDiff(originalText, tailoredText) {
       } else {
         results.push({ type: "changed", original: orig, tailored: tail, ops: diffWords(orig, tail) });
       }
-    }
-  }
-
-  for (let j = 0; j < tailParas.length; j++) {
-    if (!usedTail.has(j)) {
-      results.push({ type: "added", original: "", tailored: tailParas[j] });
     }
   }
 
@@ -114,8 +113,8 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
     if (!url) return;
     const filename = originalFile.name.replace(/\.(docx|doc)$/i, "") + "-tailored.docx";
     triggerDownload(url, filename);
-    // Open Google Drive upload page — user can drag the downloaded file straight in
-    setTimeout(() => window.open("https://drive.google.com/drive/u/0/my-drive", "_blank"), 700);
+    // docs.new opens a blank Google Doc — user can then File > Open to upload
+    setTimeout(() => window.open("https://docs.new", "_blank"), 700);
   }
 
   function renderOps(ops, side) {
@@ -179,7 +178,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
         <button className="btn-gdocs" onClick={handleOpenGoogleDocs} disabled={building}>
           Open in Google Docs
         </button>
-        <span className="gdocs-hint">Downloads file · opens Google Drive → drag file in → open as Docs → export PDF</span>
+        <span className="gdocs-hint">Downloads file · opens Google Docs → File → Open → upload the file → File → Download as PDF</span>
       </div>
 
       {buildError && <p className="error-msg" style={{ margin: "0 20px 16px" }}>{buildError}</p>}
