@@ -189,22 +189,6 @@ Server-side enforcement catches what the prompt misses.
 
 ---
 
-## Removing the test panel
-
-Before public launch, remove `TestPanel` from `App.jsx`:
-
-```jsx
-// Remove this import:
-import TestPanel from "./components/TestPanel";
-
-// Remove this from the JSX:
-<TestPanel ... />
-```
-
-Delete `src/components/TestPanel.jsx`.
-
----
-
 ## Author
 
 Shantanu Makkar

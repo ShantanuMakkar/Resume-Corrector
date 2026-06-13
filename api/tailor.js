@@ -401,19 +401,56 @@ ${jd}`;
     const correctedContent = contentLines.map(({ line: origLine, meta }, i) => {
       const tailLine = tailoredContentLines[i] ?? origLine;
       if (!tailLine.trim()) return origLine;
-      if (meta.isSkills && skillsRankingLost(origLine, tailLine)) return origLine;
+
+      // 1. Always protect first 5 content lines (name, summary, contact)
+      if (i < 5) return origLine;
+
+      // 2. Skills: revert if ranking numbers lost
+      if (meta.isSkills && skillsRankingLost(origLine, tailLine)) {
+        console.log(`[enforce] Line ${i+1} reverted: skills ranking lost`);
+        return origLine;
+      }
+
       const tailWords = tailLine.trim().split(/\s+/).filter(Boolean).length;
-      // Revert if too long
+
+      // 3. Revert if over word budget
       if (tailWords > meta.budget) {
         console.log(`[enforce] Line ${i+1} too long: ${tailWords}w > ${meta.budget}w budget`);
         return origLine;
       }
-      // Revert if too short (truncation) — must keep at least 85% of original words
+
+      // 4. Revert if truncated (< 92% of original words)
       const minWords = Math.floor(meta.words * 0.92);
       if (tailWords < minWords && meta.words > 5) {
         console.log(`[enforce] Line ${i+1} truncated: ${tailWords}w < min ${minWords}w`);
         return origLine;
       }
+
+      // 5. Revert if keyword appended after a metric ("by 25% across EC2" / "to 100% via KMS")
+      if (meta.isBullet) {
+        const origEndsWithMetric = /\b\d+[%kKmM]?\.\s*$/.test(origLine.trim());
+        const tailEndsWithMetric = /\b\d+[%kKmM]?\.\s*$/.test(tailLine.trim());
+        if (origEndsWithMetric && !tailEndsWithMetric) {
+          console.log(`[enforce] Line ${i+1} reverted: keyword appended after metric`);
+          return origLine;
+        }
+      }
+
+      // 6. Revert false migration target injection (e.g. "to RDS" → "to RDS/ElastiCache")
+      if (meta.isBullet && /\b(?:migrat|mov|convert|upgrad)/i.test(origLine)) {
+        const origWords = origLine.split(/\s+/);
+        const tailWords2 = tailLine.split(/\s+/);
+        const falseInjection = origWords.some((ow, wi) => {
+          const tw = tailWords2[wi] || '';
+          return !ow.includes('/') && tw.includes('/') &&
+            tw.toLowerCase().startsWith(ow.toLowerCase().replace(/[,.]$/, ''));
+        });
+        if (falseInjection) {
+          console.log(`[enforce] Line ${i+1} reverted: false migration target injection`);
+          return origLine;
+        }
+      }
+
       return tailLine;
     });
 
