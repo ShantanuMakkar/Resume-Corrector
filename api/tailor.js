@@ -216,7 +216,7 @@ export default async function handler(req, res) {
       (jd.match(/\b[A-Z][a-zA-Z0-9]*(?:\/[A-Z][a-zA-Z0-9]*)?\b/g) || [])
         .filter(t => t.length > 2 && !["The","This","We","Our","You","For","With","And","But","Has","Are","Not","All","Any","Can","May","Will"].includes(t))
     )];
-    const promptMissingKws = jdTerms.filter(t => !resumeText.toLowerCase().includes(t.toLowerCase())).slice(0, 15);
+    const promptMissingKws = jdTerms.filter(t => !resumeText.toLowerCase().includes(t.toLowerCase()) && !NON_TECH_JD_WORDS.has(t)).slice(0, 15);
 
     const systemPrompt = `You are an ATS resume keyword injector. Your ONLY job is to inject missing JD keywords into the resume.
 
@@ -238,12 +238,17 @@ WHERE TO INJECT:
    - DB/migration bullet → add ElastiCache, Opensearch, DynamoDB if in JD
    - Cost/performance bullet → add FinOps, cost management if in JD
    Budget per bullet: inject 1-2 keywords, keep sentence meaning intact
-   CRITICAL: Do NOT truncate or shorten sentences. Only ADD keywords, never remove content.
+   CRITICAL: Do NOT truncate or shorten sentences. Never remove metrics, percentages, or outcomes.
+   Inject keywords INLINE using slashes or commas — NOT in parentheses:
+     Good: "Lambda/SQS/MSK" or "Terraform, CloudFormation, and CodePipeline"
+     Bad: "SQS (MSK)" or "Terraform (CodePipeline)"
    Remove ONLY these specific filler words to make room: "ingestion", "scripting", "in a timely manner"
-   If no filler exists, append keyword in parentheses: "(using MSK)" or "(ElastiCache)"
+   If no filler exists, append inline at natural join point: "...via ELK, Splunk, and Opensearch"
 
-2. SKILLS LINE — swap low-value skills for missing JD keywords:
-   Replace skills scored (1) or (2) with the missing keywords above
+2. SKILLS LINE — swap maximum 3 low-value skills for missing JD keywords:
+   Only replace skills scored (1) or (2) AND that do NOT appear in any bullet point
+   Never remove: GitLab, CI/CD, DevSecOps, Agile, Splunk, Vault, Checkmarx, Trivy, or any tool mentioned in bullets
+   Add: MWAA, ElastiCache, Opensearch, MSK, KMS, EC2, CloudFormation — whichever are most critical
    Keep ALL (number) rankings — only swap the skill name
    Budget: same total word count (net zero change)
 
@@ -326,7 +331,10 @@ ${jd}`;
 
     // Fix #8: consistent scoring
     const matchedKws = analysis?.matchedKeywords || [];
-    const missingKws = analysis?.missingKeywords || [];
+    // Deduplicate: remove from missing anything already in matched
+    const missingKws = (analysis?.missingKeywords || []).filter(k =>
+      !matchedKws.some(m => m.toLowerCase() === k.toLowerCase())
+    );
     const beforeScore = keywordScore(resumeText, matchedKws, missingKws);
 
     // Enforce per-line budgets — also enforce minimum (no truncation)
@@ -341,7 +349,7 @@ ${jd}`;
         return origLine;
       }
       // Revert if too short (truncation) — must keep at least 85% of original words
-      const minWords = Math.floor(meta.words * 0.85);
+      const minWords = Math.floor(meta.words * 0.92);
       if (tailWords < minWords && meta.words > 5) {
         console.log(`[enforce] Line ${i+1} truncated: ${tailWords}w < min ${minWords}w`);
         return origLine;
