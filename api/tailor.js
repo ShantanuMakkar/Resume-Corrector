@@ -324,10 +324,46 @@ ${jd}`;
       console.warn("Analysis parse failed:", e.message);
     }
 
-    // Deterministic scoring — we extract JD keywords ourselves for consistent scores
+    // Deterministic scoring — extract genuine tech terms from JD
+    // Filter: must be >3 chars, not a common English word, look like a tech term
+    // Extract only genuine tech product/tool names from JD
+    // Strategy: keep short acronyms (EC2, EKS, MSK) and known tech patterns
+    // Reject generic English words even if capitalised
+    const GENERIC_WORDS = new Set([
+      "Main","Work","Tech","Stack","Cloud","Security","Services","More","Than","Years",
+      "Good","Have","Must","Should","Will","Also","Both","Such","Each","Please","About",
+      "Other","Their","These","Those","Some","Only","Just","Very","Most","Well","Even",
+      "Many","Much","Still","High","Best","Fast","Easy","Full","Free","Open","Next","Last",
+      "Team","Role","Time","Type","Data","Code","Test","User","File","Tool","Area","Page",
+      "List","Item","Base","Core","Mode","Path","Port","Task","Step","Flow","Call","Real",
+      "Live","Side","Back","Part","Used","Need","Help","Make","Give","Keep","Take","Know",
+      "Show","Find","Turn","Move","Come","Want","Like","Look","Into","Over","Then","When",
+      "Here","There","Where","From","This","That","With","Your","Been","They","Were","What",
+      "Which","While","After","Before","Since","Until","During","Within","Between","Against",
+      "Through","Around","Below","Under","Along","Across","Behind","Beyond","Inside","Outside",
+      "Responsibilities","Architect","Infrastructure","Engineers","Automations","Deployments",
+      "Provide","Required","Qualifications","Experience","Platform","Requirement","Ability",
+      "Demonstrate","Understanding","Building","Design","Manage","Ensure","Enable","Support",
+      "Delivery","Extensive","Technical","Excellent","Written","Verbal","Interpersonal",
+      "Demonstrated","Published","Relevant","Verifiable","Proficiency","Either","Language",
+      "Secret","Manager","Based","Regional","Failure","Tolerance","Industry","Standards",
+      "Compliance","Payment","Large","Scale","Distributed","Preferred","Bachelor","Degree",
+      "Related","Field","Optional","Required","Nice","Bilingual","English","Japanese"
+    ]);
     const allJdTerms = [...new Set(
-      (jd.match(/\b[A-Z][a-zA-Z0-9]+\b/g) || [])
-        .filter(t => t.length > 2 && !NON_TECH_JD_WORDS.has(t))
+      (jd.match(/\b[A-Z][a-zA-Z0-9]{1,}\b/g) || [])
+        .filter(t => {
+          if (GENERIC_WORDS.has(t) || NON_TECH_JD_WORDS.has(t)) return false;
+          // Keep: all-caps acronyms (EC2, EKS, MSK, KMS, VPC, CDK, IAC)
+          if (/^[A-Z0-9]{2,8}$/.test(t)) return true;
+          // Keep: known tech patterns (starts with capital, contains numbers or mixed case)
+          if (/[0-9]/.test(t)) return true; // EC2, S3, EKS, Grafana2 etc
+          // Keep: camelCase tech names (OpenTelemetry, ArgoCD, CloudFormation, DynamoDB)
+          if (/[A-Z].*[A-Z]/.test(t) && t.length > 4) return true;
+          // Keep: specific known tools (single-word capitalised tech names >= 4 chars)
+          const knownTools = new Set(["Terraform","Prometheus","Grafana","Dynatrace","Atlantis","Kafka","Redis","Ansible","Helm","Vault","Splunk","Jenkins","Docker","Linux","Python","Rust","Golang","Bash","Kubernetes","Lambda","Cloudfront","ElastiCache","DynamoDB","Opensearch","CloudWatch","Cognito","CloudFormation","ShellScripting","CodeCommit","CodeBuild","CodeDeploy","CodePipeline","ArgoCD","MWAA","OpenTelemetry"]);
+          return knownTools.has(t);
+        })
     )];
     const beforeScore = keywordScore(resumeText, allJdTerms, []);
 
