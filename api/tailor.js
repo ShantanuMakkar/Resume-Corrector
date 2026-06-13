@@ -212,6 +212,8 @@ export default async function handler(req, res) {
     const summaryAlreadyGood = similarityScore(summaryText, jd.slice(0, 500)) > 0.25;
 
     // Pre-compute missing keywords from JD vs resume for use in prompt
+    const NON_TECH_JD_WORDS = new Set(["Automations","Responsibilities","Deployments","Provide","Architect","Services","Engineers","Infrastructure","Requirements","Qualifications","Please","Have","Must","Will","This","With","From","Your","Their","More","Other","Both","Also","Such","Each","These","Those"]);
+
     const jdTerms = [...new Set(
       (jd.match(/\b[A-Z][a-zA-Z0-9]*(?:\/[A-Z][a-zA-Z0-9]*)?\b/g) || [])
         .filter(t => t.length > 2 && !["The","This","We","Our","You","For","With","And","But","Has","Are","Not","All","Any","Can","May","Will"].includes(t))
