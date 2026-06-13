@@ -91,10 +91,10 @@ Inject missing JD keywords into skills line AND every relevant bullet point. Tri
       systemInstruction: systemPrompt,
     });
 
-    const analysisPrompt = `Analyze this resume against the job description. Return ONLY valid JSON, no markdown:
+    const analysisPrompt = `Analyze the ORIGINAL (untailored) resume against the job description. Return ONLY valid JSON, no markdown:
 
 {
-  "matchScore": <0-100 integer>,
+  "matchScore": <0-100 integer — how well original resume matches JD keywords>,
   "missingKeywords": [<JD keywords completely absent from resume, max 10, most critical first>],
   "matchedKeywords": [<top JD keywords already in resume, max 12>],
   "missingContext": "<one sentence on the single most critical gap>",
@@ -141,6 +141,22 @@ ${jd}`;
 
     tailoredText = corrected.join("\n");
     const tailoredWordCount = tailoredText.split(/\s+/).filter(Boolean).length;
+
+    // Compute a simple keyword-based afterScore from the tailored text
+    // so we can show the delta without a second API call
+    let afterScore = null;
+    if (analysis?.matchScore != null && analysis?.matchedKeywords) {
+      // Count how many originally-missing keywords now appear in the tailored text
+      const missing = analysis.missingKeywords || [];
+      const nowPresent = missing.filter(kw =>
+        tailoredText.toLowerCase().includes(kw.toLowerCase())
+      ).length;
+      const totalJdKeywords = (analysis.matchedKeywords.length + missing.length) || 1;
+      const improvement = Math.round((nowPresent / totalJdKeywords) * 25); // max +25 pts
+      afterScore = Math.min(100, analysis.matchScore + improvement);
+      if (analysis) analysis.beforeScore = analysis.matchScore;
+      if (analysis) analysis.matchScore = afterScore;
+    }
 
     return res.status(200).json({
       tailoredText,

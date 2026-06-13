@@ -148,9 +148,10 @@ function DiffBlock({ entry, isAccepted, onToggle, compact }) {
 }
 
 // ── analysis panel ─────────────────────────────────────────────────────────────
-function MatchScore({ score }) {
+function MatchScore({ score, beforeScore }) {
   const color = score >= 75 ? "#4ddb8a" : score >= 50 ? "#f0c040" : "#ff6b6b";
   const r = 26, circ = 2 * Math.PI * r, dash = (score/100)*circ;
+  const delta = beforeScore != null ? score - beforeScore : null;
   return (
     <div style={{display:"flex",alignItems:"center",gap:"12px",flexShrink:0}}>
       <svg width="64" height="64" viewBox="0 0 64 64">
@@ -165,7 +166,12 @@ function MatchScore({ score }) {
         <div style={{fontSize:"12px",color:"#555",marginTop:"2px"}}>
           {score >= 75 ? "Strong fit" : score >= 50 ? "Moderate fit" : "Weak fit"}
         </div>
-        <div style={{fontSize:"11px",color:"#555",marginTop:"3px"}}>after tailoring</div>
+        {delta != null && (
+          <div style={{fontSize:"11px",color: delta > 0 ? "#4ddb8a" : "#888",marginTop:"3px",fontWeight:600}}>
+            {delta > 0 ? `+${delta}%` : delta === 0 ? "no change" : `${delta}%`} from original
+          </div>
+        )}
+        {delta == null && <div style={{fontSize:"11px",color:"#555",marginTop:"3px"}}>after tailoring</div>}
       </div>
     </div>
   );
@@ -188,7 +194,7 @@ function AnalysisPanel({ analysis }) {
         </div>
       )}
       <div style={{display:"flex",gap:"20px",flexWrap:"wrap",alignItems:"flex-start",paddingBottom:"14px",borderBottom:"1px solid #1a1a1a"}}>
-        {analysis.matchScore != null && <MatchScore score={analysis.matchScore}/>}
+        {analysis.matchScore != null && <MatchScore score={analysis.matchScore} beforeScore={analysis.beforeScore}/>}
         <div style={{flex:1,minWidth:"180px"}}>
           {analysis.titleAlignment && <p style={{fontSize:"13px",color:"#aaa",marginBottom:"6px",lineHeight:1.5}}>{analysis.titleAlignment}</p>}
           {analysis.recommendation && <p style={{fontSize:"12px",color:"#666",lineHeight:1.5,fontStyle:"italic"}}>{analysis.recommendation}</p>}
@@ -341,6 +347,22 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 export default function ResultPanel({ originalText, tailoredText, originalFile, tailorStats, analysis, jd, onRetailor, onReset }) {
   const [view, setView] = useState("diff");
   const [recsVisited, setRecsVisited] = useState(false);
+  const diffScrollRef = useRef(0);
+  const diffViewRef = useRef(null);
+
+  function switchView(v) {
+    if (view === "diff" && diffViewRef.current) {
+      diffScrollRef.current = diffViewRef.current.scrollTop;
+    }
+    setView(v);
+    if (v === "recs") setRecsVisited(true);
+  }
+
+  useEffect(() => {
+    if (view === "diff" && diffViewRef.current) {
+      diffViewRef.current.scrollTop = diffScrollRef.current;
+    }
+  }, [view]);
   const [building, setBuilding] = useState(false);
   const [downloadDone, setDownloadDone] = useState(false);
   const [docxUrl, setDocxUrl] = useState(null);
@@ -430,7 +452,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
     if (url) {
       triggerDownload(url, `${originalFile.name.replace(/\.(docx|doc)$/i,"")}-tailored.docx`);
       setDownloadDone(true);
-      setTimeout(() => setDownloadDone(false), 3000);
+      setTimeout(() => setDownloadDone(false), 4000);
     }
   }
 
@@ -475,14 +497,22 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
           <span className="gdocs-hint">Downloads file · open at docs.new · File → Open</span>
         </div>
         {buildError && <p className="error-msg" style={{margin:"-4px 20px 12px"}}>{buildError}</p>}
+        {downloadDone && (
+          <div style={{margin:"0 20px 12px",padding:"10px 14px",background:"rgba(60,220,120,0.07)",border:"1px solid rgba(60,220,120,0.15)",borderRadius:"7px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <span style={{fontSize:"13px",color:"#4ddb8a"}}>✓ Downloaded — good luck with the application!</span>
+            <button onClick={onReset} style={{background:"none",border:"1px solid rgba(60,220,120,0.2)",color:"#4ddb8a",borderRadius:"5px",padding:"4px 10px",fontSize:"11px",cursor:"pointer",whiteSpace:"nowrap"}}>
+              New resume
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Fix #11: thicker tab underline */}
       <div className="tab-bar">
-        <button className={`tab ${view==="diff"?"tab-active":""}`} onClick={() => setView("diff")}>
+        <button className={`tab ${view==="diff"?"tab-active":""}`} onClick={() => switchView("diff")}>
           Changes <span className="tab-count">{acceptedCount}</span>
         </button>
-        <button className={`tab ${view==="recs"?"tab-active":""}`} onClick={() => { setView("recs"); setRecsVisited(true); }}>
+        <button className={`tab ${view==="recs"?"tab-active":""}`} onClick={() => switchView("recs")}>
           Recommendations
           {recsLoading
             ? <span className="spinner spinner-sm" style={{marginLeft:6,borderColor:"rgba(200,240,100,0.15)",borderTopColor:"#c8f064"}}/>
@@ -492,7 +522,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
       </div>
 
       {view === "diff" && (
-        <div className="diff-view">
+        <div className="diff-view" ref={diffViewRef}>
 
           {/* Fix #12: clear hierarchy — primary / secondary / danger */}
           {allChangedIndices.length > 0 && (

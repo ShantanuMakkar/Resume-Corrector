@@ -151,6 +151,21 @@ export default function App() {
   // Fix #5: get current wait message based on elapsed
   const waitMsg = [...WAIT_MESSAGES].reverse().find(m => elapsed >= m.at)?.msg || WAIT_MESSAGES[0].msg;
 
+  function friendlyError(msg = "") {
+    const s = msg.toLowerCase();
+    if (s.includes("429") || s.includes("quota") || s.includes("rate limit") || s.includes("resource_exhausted"))
+      return "Gemini free tier limit reached — wait a few minutes and try again.";
+    if (s.includes("timeout") || s.includes("deadline") || s.includes("timed out"))
+      return "Request timed out — try with a shorter job description.";
+    if (s.includes("api_key") || s.includes("api key") || s.includes("unauthorized") || s.includes("401"))
+      return "API key issue — check that GOOGLE_API_KEY is set correctly.";
+    if (s.includes("500") || s.includes("internal server"))
+      return "Server error — try again in a moment.";
+    if (s.includes("network") || s.includes("fetch"))
+      return "Network error — check your connection and try again.";
+    return msg.slice(0, 150) || "Something went wrong — please try again.";
+  }
+
   async function handleTailor() {
     setStatus("processing");
     setErrorMsg("");
@@ -165,9 +180,9 @@ export default function App() {
       try {
         data = JSON.parse(rawText);
       } catch {
-        throw new Error(rawText.slice(0, 200) || "Server returned invalid response");
+        throw new Error(friendlyError(rawText));
       }
-      if (!response.ok) throw new Error(data.error || "Server error");
+      if (!response.ok) throw new Error(friendlyError(data.error || rawText));
       setTailoredText(data.tailoredText);
       setTailorStats(data.stats || null);
       setAnalysis(data.analysis || null);
@@ -256,7 +271,7 @@ export default function App() {
           )}
 
           {/* Fix #2: JD with hint */}
-          <JDInput value={jd} onChange={setJd} />
+          <JDInput value={jd} onChange={setJd} onSubmit={() => canTailor && status !== "processing" && handleTailor()} />
 
           <div className="action-row">
             {/* Fix #4 + #6: preserve JD on error, show retry */}
