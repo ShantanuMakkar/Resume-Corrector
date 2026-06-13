@@ -130,6 +130,19 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [showScrollBtn, setShowScrollBtn] = useState(true);
+
+  useEffect(() => {
+    if (resumeFile || status === "done") { setShowScrollBtn(false); return; }
+    const el = document.getElementById("upload-section");
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowScrollBtn(!entry.isIntersecting),
+      { threshold: 0.1 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [resumeFile, status]);
 
   const canTailor = resumeFile && resumeText && jd.trim().length > 50;
 
@@ -238,7 +251,7 @@ export default function App() {
       ) : (
         <main className="main-grid">
           {!resumeFile && <HowItWorks />}
-          {!resumeFile && (
+          {showScrollBtn && (
             <div style={{
               position: "fixed",
               bottom: "28px",
