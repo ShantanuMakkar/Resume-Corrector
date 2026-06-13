@@ -158,7 +158,8 @@ export async function extractDocx(file) {
   return { arrayBuffer, docXml, resumeText };
 }
 
-// Keep mammoth extraction as fallback for display if needed
+// Extract text using XML — same source as injection
+// This guarantees paragraph boundaries match between AI input and docx output
 export async function extractTextFromDocx(file) {
   const { resumeText } = await extractDocx(file);
   return resumeText;

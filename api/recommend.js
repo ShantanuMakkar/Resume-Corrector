@@ -16,50 +16,52 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing resumeText or jd" });
     }
 
-    const prompt = `You are a senior career coach reviewing a candidate's resume against a job description.
+    // Fix #5: fully generic prompt — no hardcoded examples
+    const prompt = `You are a senior career coach. Analyze this candidate's resume against the job description.
+Your advice must be SPECIFIC to this candidate's actual experience, companies, numbers, and stack.
+Do not give generic advice. Reference their real projects, metrics, and technologies.
 
-Analyze the resume and JD deeply, then return ONLY a valid JSON object (no markdown, no explanation) in this exact format:
+Return ONLY a valid JSON object. No markdown, no code fences, no explanation.
 
 {
   "suggestedBullets": [
     {
-      "section": "Infosys / Truist project",
-      "bullet": "Led cross-functional incident response for 15M+ user payment platform, reducing P1 resolution time by X%",
-      "reasoning": "Your 9 years of experience and Vault/OPA/PagerDuty usage implies SRE-level incident ownership — the JD explicitly asks for this"
+      "section": "<exact project/company name from resume where this bullet belongs>",
+      "bullet": "<a specific, truthful bullet the candidate could add — use their actual numbers, stack, and context>",
+      "reasoning": "<why this bullet is relevant to THIS specific JD — reference the JD requirement it addresses>"
     }
   ],
   "skillsToAdd": [
     {
-      "skill": "FinOps",
-      "reasoning": "You built $15K savings dashboards with Kubecost/Cost Explorer — that IS FinOps. The JD mentions cost optimization ownership."
+      "skill": "<skill/tool/methodology the candidate demonstrably has but didn't list>",
+      "reasoning": "<which part of their experience implies this skill, and which JD requirement it addresses>"
     }
   ],
   "framingSuggestions": [
     {
-      "current": "Designed GitLab CI/CD pipelines with Terraform",
-      "reframe": "Owned end-to-end CI/CD platform engineering for a 15M-user production system",
-      "reasoning": "The JD is for a senior role — own the platform, don't just describe the tool"
+      "current": "<exact text of an existing bullet that undersells the candidate>",
+      "reframe": "<stronger version of the same bullet, using JD language, same facts>",
+      "reasoning": "<why the reframe is stronger for this specific role>"
     }
   ],
   "genuineGaps": [
     {
-      "gap": "Multi-region disaster recovery",
-      "severity": "high",
-      "suggestion": "If you've done any DR planning at HSBC or Truist, add it explicitly. Otherwise be prepared to discuss this in interviews."
+      "gap": "<skill or experience the JD requires that is genuinely absent from the resume>",
+      "severity": "<high|medium|low>",
+      "suggestion": "<specific actionable advice: if they have partial experience, say where; if not, how to address in interviews>"
     }
   ],
   "coverLetterHooks": [
-    "Lead with the Truist platform scale — 15M users, 10M+ daily notifications is enterprise-grade and directly matches this role",
-    "Mention the $15K cloud savings as a concrete FinOps win"
+    "<specific talking point from their actual experience that directly addresses a key JD requirement — be concrete, name the project/metric>"
   ]
 }
 
 Rules:
-- suggestedBullets: 2-4 specific bullets the candidate COULD truthfully add based on their implied experience. Be specific, use their actual stack and numbers.
-- skillsToAdd: 2-4 skills/frameworks they demonstrably have but didn't list
-- framingSuggestions: 2-3 existing bullets that undersell the candidate and how to reframe them for this JD
-- genuineGaps: honest gaps with severity (high/medium/low) and actionable suggestion
-- coverLetterHooks: 2-3 specific talking points for the cover letter/interview
+- suggestedBullets: 2-4 bullets. Must be truthful — inferred from what they clearly did, not fabricated.
+- skillsToAdd: 2-4 skills. Only suggest what their work clearly implies.
+- framingSuggestions: 2-3 bullets that undersell. Show the stronger version using their real facts.
+- genuineGaps: 1-4 honest gaps. Be direct about severity. Low = nice to have, High = likely screened out.
+- coverLetterHooks: 2-3 hooks. Must be specific to their experience, not generic advice.
 
 Resume:
 ${resumeText}
@@ -69,10 +71,8 @@ ${jd}`;
 
     const model = client.getGenerativeModel({ model: "gemini-2.5-flash" });
     const response = await model.generateContent(prompt);
-    let raw = response.response.text().trim();
-
-    // Strip markdown code fences if present
-    raw = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+    let raw = response.response.text().trim()
+      .replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
 
     const recommendations = JSON.parse(raw);
     return res.status(200).json({ recommendations });
