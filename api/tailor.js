@@ -225,11 +225,14 @@ WHERE TO INJECT:
    - Lambda/SQS/API Gateway bullet → add SNS, EventBridge, MSK or KMS if in JD
    - Terraform/CI-CD bullet → add CloudFormation, IaC, CodePipeline if in JD
    - Kubernetes/EKS bullet → add EC2, node management context if in JD
-   - Security/IAM bullet → add KMS, Secrets Manager, compliance if in JD
+   - Security/IAM bullet → add KMS or Secrets Manager keyword if in JD
    - Monitoring bullet → add OpenTelemetry, Dynatrace if in JD
    - DB/migration bullet → add ElastiCache, Opensearch, DynamoDB if in JD
    - Cost/performance bullet → add FinOps, cost management if in JD
-   Budget per bullet: up to +3 words (always remove filler first to stay within budget)
+   Budget per bullet: inject 1-2 keywords, keep sentence meaning intact
+   CRITICAL: Do NOT truncate or shorten sentences. Only ADD keywords, never remove content.
+   Remove ONLY these specific filler words to make room: "ingestion", "scripting", "in a timely manner"
+   If no filler exists, append keyword in parentheses: "(using MSK)" or "(ElastiCache)"
 
 2. SKILLS LINE — swap low-value skills for missing JD keywords:
    Replace skills scored (1) or (2) with the missing keywords above
@@ -318,13 +321,23 @@ ${jd}`;
     const missingKws = analysis?.missingKeywords || [];
     const beforeScore = keywordScore(resumeText, matchedKws, missingKws);
 
-    // Enforce per-line budgets
+    // Enforce per-line budgets — also enforce minimum (no truncation)
     const correctedContent = contentLines.map(({ line: origLine, meta }, i) => {
       const tailLine = tailoredContentLines[i] ?? origLine;
       if (!tailLine.trim()) return origLine;
       if (meta.isSkills && skillsRankingLost(origLine, tailLine)) return origLine;
       const tailWords = tailLine.trim().split(/\s+/).filter(Boolean).length;
-      if (tailWords > meta.budget) return origLine;
+      // Revert if too long
+      if (tailWords > meta.budget) {
+        console.log(`[enforce] Line ${i+1} too long: ${tailWords}w > ${meta.budget}w budget`);
+        return origLine;
+      }
+      // Revert if too short (truncation) — must keep at least 85% of original words
+      const minWords = Math.floor(meta.words * 0.85);
+      if (tailWords < minWords && meta.words > 5) {
+        console.log(`[enforce] Line ${i+1} truncated: ${tailWords}w < min ${minWords}w`);
+        return origLine;
+      }
       return tailLine;
     });
 
