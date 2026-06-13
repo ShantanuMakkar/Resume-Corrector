@@ -18,10 +18,19 @@ async function generateWithFallback(primaryConfig, fallbackModelName, ...args) {
     const model = client.getGenerativeModel(primaryConfig);
     return await model.generateContent(...args);
   } catch (err) {
-    if (isQuotaError(err)) {
-      console.log(`[fallback] ${primaryConfig.model} quota hit, switching to ${fallbackModelName}`);
-      // 1.5-flash doesn't support thinkingConfig — use clean config
-      const fallbackModel = client.getGenerativeModel({ model: fallbackModelName });
+    const msg = (err?.message || "").toLowerCase();
+    // Fallback on quota errors OR if thinkingConfig is not supported by this model
+    const shouldFallback = isQuotaError(err) ||
+      msg.includes("thinking") ||
+      msg.includes("thinkingconfig") ||
+      msg.includes("unsupported") ||
+      msg.includes("invalid") && msg.includes("config");
+    if (shouldFallback) {
+      console.log(`[fallback] ${primaryConfig.model} error (${err.message?.slice(0,60)}), switching to ${fallbackModelName}`);
+      // Clean config — no thinkingConfig, no systemInstruction wrapper issues
+      const fallbackConfig = { model: fallbackModelName };
+      if (primaryConfig.systemInstruction) fallbackConfig.systemInstruction = primaryConfig.systemInstruction;
+      const fallbackModel = client.getGenerativeModel(fallbackConfig);
       return await fallbackModel.generateContent(...args);
     }
     throw err;

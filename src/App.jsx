@@ -161,8 +161,8 @@ export default function App() {
       return "API key issue — check that GOOGLE_API_KEY is set correctly.";
     if (s.includes("500") || s.includes("internal server"))
       return "Server error — try again in a moment.";
-    if (s.includes("network") || s.includes("fetch"))
-      return "Network error — check your connection and try again.";
+    if (s.includes("network") || s.includes("fetch") || s.includes("failed to fetch") || s.includes("load failed") || s.includes("networkerror"))
+      return "Could not reach the server — check your connection, or the server may be starting up. Try again in a moment.";
     return msg.slice(0, 150) || "Something went wrong — please try again.";
   }
 
@@ -170,11 +170,17 @@ export default function App() {
     setStatus("processing");
     setErrorMsg("");
     try {
-      const response = await fetch("/api/tailor", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resumeText, jd }),
-      });
+      let response;
+      try {
+        response = await fetch("/api/tailor", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resumeText, jd }),
+        });
+      } catch (fetchErr) {
+        // fetch() itself threw — network down or server unreachable
+        throw new Error("Could not reach the server — check your connection, or the server may be starting up. Try again in a moment.");
+      }
       const rawText = await response.text();
       let data;
       try {
