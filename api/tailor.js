@@ -208,12 +208,12 @@ export default async function handler(req, res) {
       (jd.match(/\b[A-Z][a-zA-Z0-9]*(?:\/[A-Z][a-zA-Z0-9]*)?\b/g) || [])
         .filter(t => t.length > 2 && !["The","This","We","Our","You","For","With","And","But","Has","Are","Not","All","Any","Can","May","Will"].includes(t))
     )];
-    const missingKws = jdTerms.filter(t => !resumeText.toLowerCase().includes(t.toLowerCase())).slice(0, 15);
+    const promptMissingKws = jdTerms.filter(t => !resumeText.toLowerCase().includes(t.toLowerCase())).slice(0, 15);
 
     const systemPrompt = `You are an ATS resume keyword injector. Your ONLY job is to inject missing JD keywords into the resume.
 
 MISSING KEYWORDS TO INJECT (from JD, absent from resume):
-${missingKws.length > 0 ? missingKws.join(", ") : "Extract missing technical keywords from the JD"}
+${promptMissingKws.length > 0 ? promptMissingKws.join(", ") : "Extract missing technical keywords from the JD"}
 
 WHERE TO INJECT:
 
