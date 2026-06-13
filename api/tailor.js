@@ -203,57 +203,51 @@ export default async function handler(req, res) {
     const summaryText = contentLines.slice(0, 4).map(l => l.line).join(" ");
     const summaryAlreadyGood = similarityScore(summaryText, jd.slice(0, 500)) > 0.25;
 
-    const systemPrompt = `You are an ATS optimization specialist. Inject missing JD keywords into the resume.
+    const systemPrompt = `You are an ATS resume keyword injector. Your ONLY job is to inject missing JD keywords into the resume.
 
-STEP 1 — IDENTIFY MISSING KEYWORDS:
-Extract every technical skill, tool, methodology, cloud service, and domain term from the JD.
-Find which are ABSENT from the resume. These are your targets.
+MISSING KEYWORDS TO INJECT (from JD, absent from resume):
+${missingKws.length > 0 ? missingKws.join(", ") : "Extract missing technical keywords from the JD"}
 
-STEP 2 — INJECT INTO TARGETS:
+WHERE TO INJECT:
 
-TARGET 1 — SKILLS LINE:
-- Keep ALL existing ranking numbers like "(9)", "(8)" — never remove them
-- Reorder to lead with JD-critical terms, preserve (number) format
-- SWAP strategy: replace low-priority skills (those with low scores like (1) or (2)) with missing JD keywords
-- Example: replace "OWASP ZAP (1)" with "MWAA" or "ElastiCache" if JD requires them
-- Budget: same word count (swaps allowed, no net additions)
+1. BULLET POINTS — you MUST change at least 5-8 bullets:
+   For each bullet, inject the most relevant missing keyword by removing filler words first.
+   Filler to remove: "ingestion", "scripting", "successfully", "utilizing", "leveraging", "in a timely manner"
 
-TARGET 2 — BULLET POINTS:
-- Inject per bullet: what JD keyword does this work involve that isn't named?
-- Remove filler to make room: "successfully", "utilizing", "leveraging", "in a timely manner"
-- Budget: +3 words per bullet
-- Touch EVERY relevant bullet
+   MANDATORY injections:
+   - Lambda/SQS/API Gateway bullet → add SNS, EventBridge, MSK or KMS if in JD
+   - Terraform/CI-CD bullet → add CloudFormation, IaC, CodePipeline if in JD
+   - Kubernetes/EKS bullet → add EC2, node management context if in JD
+   - Security/IAM bullet → add KMS, Secrets Manager, compliance if in JD
+   - Monitoring bullet → add OpenTelemetry, Dynatrace if in JD
+   - DB/migration bullet → add ElastiCache, Opensearch, DynamoDB if in JD
+   - Cost/performance bullet → add FinOps, cost management if in JD
+   Budget per bullet: up to +3 words (always remove filler first to stay within budget)
 
-TARGET 3 — TECHNOLOGIES USED:
-- Add missing JD tools actually used in this project
-- Budget: +3 words
+2. SKILLS LINE — swap low-value skills for missing JD keywords:
+   Replace skills scored (1) or (2) with the missing keywords above
+   Keep ALL (number) rankings — only swap the skill name
+   Budget: same total word count (net zero change)
 
-${summaryAlreadyGood
-  ? "TARGET 4 — SUMMARY: Already decent JD match. Only change if role title significantly differs."
-  : "TARGET 4 — SUMMARY: Mirror JD role title. Add top 3 missing JD skills. Budget: +1 word."}
+3. TECHNOLOGIES USED lines — append missing JD tools that apply to that project
 
-INJECTION PATTERN:
-Before: "Built Alerts App on AWS with Lambda/SQS ingestion, boosting throughput by 40%."
-After:  "Built Alerts App on AWS (Lambda, SQS, SNS, EventBridge), boosting throughput by 40%."
-Note: removed "ingestion", added SNS+EventBridge — net 0 words
+4. SUMMARY — only change if JD role title significantly differs
 
 HARD RULES:
-- Output EXACTLY ${contentLineCount} lines
-- DO NOT prefix lines with numbers or labels — plain text only
-- Keep ranking numbers like "(9)", "(8)" in skills lines
-- Stay within per-line word budgets
-- NEVER change: name, contact info, company names, job titles, dates, education
-- NEVER fabricate skills not in resume
-- Return UNCHANGED any line with no relevant gap
+- Output EXACTLY ${contentLineCount} lines — count must match input
+- No line numbers or labels in output — plain resume text only
+- Keep (number) rankings in skills line
+- NEVER change: name, contact info, company names, job titles, dates, education, certifications
+- NEVER fabricate skills
 
-CANDIDATE LINES WITH BUDGETS (only these need changes — return all others unchanged):
-${candidateLines.map(({ line, meta }, i) => {
+LINES TO MODIFY (with word budgets):
+${candidateLines.map(({ line, meta }) => {
   const t = line.trim();
-  const tag = meta.isBullet ? "[bullet]" : meta.isSkills ? "[skills]" : meta.isTechStack ? "[tech]" : "[summary]";
-  return `${tag} max ${meta.budget}w (now ${meta.words}w): ${t.slice(0, 60)}${t.length > 60 ? "…" : ""}`;
+  const tag = meta.isBullet ? "[bullet +3w]" : meta.isSkills ? "[skills swap]" : meta.isTechStack ? "[tech +3w]" : "[summary +1w]";
+  return `${tag}: ${t.slice(0, 60)}${t.length > 60 ? "…" : ""}`;
 }).join("\n")}
 
-OUTPUT: ${contentLineCount} lines of plain resume text. No numbering, no labels.`;
+OUTPUT: ${contentLineCount} lines of plain resume text. Modify EVERY relevant bullet.`;
 
     const userPrompt = `JOB DESCRIPTION (technical requirements extracted):
 ${jd}
