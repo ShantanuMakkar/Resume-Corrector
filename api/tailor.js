@@ -98,11 +98,13 @@ function buildLineMetadata(lines) {
     const trimmed = line.trim();
     const words = trimmed.split(/\s+/).filter(Boolean).length;
     const isEmpty = words === 0;
-    const isBullet = trimmed.startsWith("●") || trimmed.startsWith("•") || trimmed.startsWith("–") || trimmed.startsWith("-");
+    const isBullet = trimmed.startsWith("●") || trimmed.startsWith("•") || trimmed.startsWith("–") || trimmed.startsWith("-") || trimmed.startsWith("• ");
     const isSkills = trimmed.includes("|") && words > 12;
     const isTechStack = trimmed.toLowerCase().startsWith("technologies used");
     const isSummary = !isBullet && !isSkills && !isTechStack && words >= 3 && words <= 15;
-    const budget = isEmpty ? 0 : isSkills ? words + 5 : (isBullet || isTechStack) ? words + 3 : words + 1;
+    // Skills: allow net-zero swaps (same word count) — model can replace low-priority with JD keywords
+    // Use original word count as budget (no increase) but explicitly allow swaps in prompt
+    const budget = isEmpty ? 0 : isSkills ? words : (isBullet || isTechStack) ? words + 3 : words + 1;
     return { words, budget, isEmpty, isBullet, isSkills, isTechStack, isSummary };
   });
 }
@@ -212,7 +214,9 @@ STEP 2 — INJECT INTO TARGETS:
 TARGET 1 — SKILLS LINE:
 - Keep ALL existing ranking numbers like "(9)", "(8)" — never remove them
 - Reorder to lead with JD-critical terms, preserve (number) format
-- Budget: +5 words
+- SWAP strategy: replace low-priority skills (those with low scores like (1) or (2)) with missing JD keywords
+- Example: replace "OWASP ZAP (1)" with "MWAA" or "ElastiCache" if JD requires them
+- Budget: same word count (swaps allowed, no net additions)
 
 TARGET 2 — BULLET POINTS:
 - Inject per bullet: what JD keyword does this work involve that isn't named?

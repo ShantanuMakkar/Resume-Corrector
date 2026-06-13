@@ -34,25 +34,34 @@ function extractTextNodes(xml) {
 }
 
 // Fix #3: extract ALL paragraphs including those inside tables
-// Tables use <w:tbl><w:tr><w:tc><w:p> — we need to find w:p anywhere in the doc
+// Also detects Word list/bullet paragraphs via w:numPr
 function extractAllParagraphs(docXml) {
   const result = [];
-  // Match any <w:p> regardless of nesting depth
   const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g;
   let match;
   while ((match = paraRegex.exec(docXml)) !== null) {
     const nodes = extractTextNodes(match[0]);
     const text = nodes.map(n => n.text).join("").trim();
-    result.push({ text, start: match.index, end: match.index + match[0].length });
+    // Detect Word list paragraphs — these are bullet points even without ● prefix
+    const isBullet = match[0].includes("<w:numPr>");
+    result.push({ text, isBullet, start: match.index, end: match.index + match[0].length });
   }
   return result;
 }
 
 // Build plain text for AI — includes table cell text
+// Marks bullet paragraphs (w:numPr) with • prefix so metadata detects them correctly
 export function buildResumeText(docXml) {
   const paras = extractAllParagraphs(docXml);
   return paras
-    .map(p => p.text)
+    .map(p => {
+      if (!p.text) return null;
+      // Mark Word list paragraphs with bullet prefix if not already marked
+      if (p.isBullet && !p.text.startsWith("●") && !p.text.startsWith("•") && !p.text.startsWith("-")) {
+        return "• " + p.text;
+      }
+      return p.text;
+    })
     .filter(Boolean)
     .join("\n");
 }
