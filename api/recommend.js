@@ -103,7 +103,7 @@ ${jd}`;
       model: "gemini-2.5-flash",
       generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
     };
-    const response = await generateWithFallback(primaryConfig, "gemini-1.5-flash", prompt);
+    const response = await generateWithFallback(primaryConfig, "gemini-2.5-flash-lite", prompt);
     let raw = response.response.text().trim()
       .replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
 

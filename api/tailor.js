@@ -286,7 +286,7 @@ ${jd}`;
       model: "gemini-2.5-flash",
       generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
     };
-    const FALLBACK_MODEL = "gemini-1.5-flash";
+    const FALLBACK_MODEL = "gemini-2.5-flash-lite";
 
     const [tailorResponse, analysisResponse] = await Promise.race([
       Promise.all([
