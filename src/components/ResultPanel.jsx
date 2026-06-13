@@ -165,6 +165,7 @@ function MatchScore({ score }) {
         <div style={{fontSize:"12px",color:"#555",marginTop:"2px"}}>
           {score >= 75 ? "Strong fit" : score >= 50 ? "Moderate fit" : "Weak fit"}
         </div>
+        <div style={{fontSize:"11px",color:"#333",marginTop:"3px"}}>after tailoring</div>
       </div>
     </div>
   );
@@ -230,7 +231,14 @@ function RecsSkeleton() {
 
 function RecommendationsPanel({ recs, recsLoading, recsError }) {
   if (recsLoading) return <RecsSkeleton/>;
-  if (recsError) return <div style={{padding:"20px"}}><p style={{color:"#ff6b6b",fontSize:"13px"}}>{recsError}</p></div>;
+  if (recsError) return (
+    <div style={{padding:"20px"}}>
+      <div style={{background:"rgba(255,80,80,0.07)",border:"1px solid rgba(255,80,80,0.15)",borderRadius:"8px",padding:"14px 16px"}}>
+        <p style={{color:"#ff8a8a",fontSize:"13px",marginBottom:"8px"}}>Couldn't load recommendations — {recsError}</p>
+        <p style={{color:"#555",fontSize:"12px"}}>The tailored resume is still ready to download above.</p>
+      </div>
+    </div>
+  );
   if (!recs) return null;
 
   const sev = { high:"#ff6b6b", medium:"#f0c040", low:"#555" };
@@ -334,6 +342,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
   const [view, setView] = useState("diff");
   const [recsVisited, setRecsVisited] = useState(false);
   const [building, setBuilding] = useState(false);
+  const [downloadDone, setDownloadDone] = useState(false);
   const [docxUrl, setDocxUrl] = useState(null);
   const [buildError, setBuildError] = useState("");
   const [recs, setRecs] = useState(null);
@@ -418,7 +427,11 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
 
   async function handleDownload() {
     const url = await buildDocx();
-    if (url) triggerDownload(url, `${originalFile.name.replace(/\.(docx|doc)$/i,"")}-tailored.docx`);
+    if (url) {
+      triggerDownload(url, `${originalFile.name.replace(/\.(docx|doc)$/i,"")}-tailored.docx`);
+      setDownloadDone(true);
+      setTimeout(() => setDownloadDone(false), 3000);
+    }
   }
 
   async function handleGoogleDocs() {
@@ -453,9 +466,12 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
       <div style={{borderBottom:"1px solid #1e1e1e"}}>
         <div className="download-row">
           <button className="btn-download" onClick={handleDownload} disabled={building}>
-            {building ? <><span className="spinner spinner-sm"/> Building…</> : "↓ Download .docx"}
+            {building ? <><span className="spinner spinner-sm"/> {docxUrl ? "Rebuilding…" : "Building…"}</>
+              : downloadDone ? "✓ Downloaded"
+              : "↓ Download .docx"}
           </button>
           <button className="btn-gdocs" onClick={handleGoogleDocs} disabled={building}>Open in Google Docs</button>
+          <CopyBtn text={buildAcceptedText(originalText, tailoredText, acceptedKeys)} size="sm"/>
           <span className="gdocs-hint">Downloads file · open at docs.new · File → Open</span>
         </div>
         {buildError && <p className="error-msg" style={{margin:"-4px 20px 12px"}}>{buildError}</p>}
