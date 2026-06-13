@@ -37,7 +37,7 @@ function HowItWorks() {
           Built for people applying to<br />
           <span style={{ color: "#c8f064" }}>a lot of jobs at once.</span>
         </h2>
-        <p style={{ fontSize: "14px", color: "#555", lineHeight: 1.6, maxWidth: "480px" }}>
+        <p style={{ fontSize: "14px", color: "#666", lineHeight: 1.6, maxWidth: "480px" }}>
           Every JD is different. ATS systems filter by keyword match before a human ever reads your resume.
           This tool closes that gap — fast, without rewriting who you are.
         </p>
@@ -73,43 +73,54 @@ function HowItWorks() {
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: "14px", fontWeight: 600, color: "#ddd", marginBottom: "4px" }}>{step.heading}</div>
-              <div style={{ fontSize: "13px", color: "#666", lineHeight: 1.55 }}>{step.body}</div>
-              <div style={{ fontSize: "12px", color: "#444", marginTop: "4px", fontStyle: "italic" }}>{step.detail}</div>
+              <div style={{ fontSize: "13px", color: "#777", lineHeight: 1.55 }}>{step.body}</div>
+              <div style={{ fontSize: "12px", color: "#555", marginTop: "4px", fontStyle: "italic" }}>{step.detail}</div>
             </div>
           </div>
         ))}
       </div>
 
       {/* What you get */}
-      <div style={{
-        marginTop: "24px",
-        background: "#161616",
-        border: "1px solid #2a2a2a",
-        borderRadius: "10px",
-        padding: "16px 20px",
-      }}>
-        <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#444", marginBottom: "12px" }}>
+      <div style={{ marginTop: "28px" }}>
+        <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#444", marginBottom: "14px" }}>
           What you get
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "8px" }}>
           {[
-            { label: "Tailored .docx", color: "#c8f064" },
-            { label: "JD match score", color: "#7eb8ff" },
-            { label: "Missing keywords", color: "#ff8a8a" },
-            { label: "Keyword injection into bullets", color: "#4ddb8a" },
-            { label: "Accept / reject each change", color: "#f0c040" },
-            { label: "Cover letter hooks", color: "#c8f064" },
-            { label: "Reframing suggestions", color: "#7eb8ff" },
-            { label: "Genuine gap analysis", color: "#ff8a8a" },
+            { label: "Tailored .docx", icon: "↓", color: "#c8f064", dim: "rgba(200,240,100,0.08)" },
+            { label: "JD match score", icon: "%", color: "#7eb8ff", dim: "rgba(126,184,255,0.08)" },
+            { label: "Missing keywords", icon: "!", color: "#ff8a8a", dim: "rgba(255,138,138,0.08)" },
+            { label: "Keyword injection", icon: "+", color: "#4ddb8a", dim: "rgba(77,219,138,0.08)" },
+            { label: "Accept / reject", icon: "✓", color: "#f0c040", dim: "rgba(240,192,64,0.08)" },
+            { label: "Cover letter hooks", icon: "→", color: "#c8f064", dim: "rgba(200,240,100,0.08)" },
+            { label: "Reframing tips", icon: "↺", color: "#7eb8ff", dim: "rgba(126,184,255,0.08)" },
+            { label: "Gap analysis", icon: "◉", color: "#ff8a8a", dim: "rgba(255,138,138,0.08)" },
           ].map((item, i) => (
-            <span key={i} style={{
-              fontSize: "12px",
-              color: item.color,
-              background: `${item.color}12`,
-              border: `1px solid ${item.color}25`,
-              borderRadius: "5px",
-              padding: "4px 10px",
-            }}>{item.label}</span>
+            <div key={i} style={{
+              background: item.dim,
+              border: `1px solid ${item.color}20`,
+              borderRadius: "8px",
+              padding: "10px 12px",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+            }}>
+              <span style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "6px",
+                background: `${item.color}18`,
+                border: `1px solid ${item.color}35`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "11px",
+                color: item.color,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}>{item.icon}</span>
+              <span style={{ fontSize: "12px", color: "#bbb", lineHeight: 1.3 }}>{item.label}</span>
+            </div>
           ))}
         </div>
       </div>
