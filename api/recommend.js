@@ -75,6 +75,31 @@ ${jd}`;
       .replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
 
     const recommendations = JSON.parse(raw);
+
+    // Fix #7: post-process to remove hallucinated bullets
+    // A suggested bullet is hallucinated if it references tools/tech not in the resume
+    if (recommendations.suggestedBullets) {
+      // Extract all tech terms from the resume (words > 3 chars, capitalised or known patterns)
+      const resumeTerms = new Set(
+        resumeText.toLowerCase().split(/[\s|,;()\[\]]+/).filter(w => w.length > 3)
+      );
+      recommendations.suggestedBullets = recommendations.suggestedBullets.filter(item => {
+        if (!item.bullet) return false;
+        // Check bullet doesn't reference major tech terms absent from resume
+        const bulletTerms = item.bullet.toLowerCase().split(/[\s|,;()\[\]]+/).filter(w => w.length > 4);
+        const unknownTerms = bulletTerms.filter(w => {
+          // Skip common English words
+          const commonWords = new Set(["built","created","implemented","developed","designed","managed","delivered","reduced","improved","increased","ensured","using","with","across","within","during","their","these","those","which","while","through","between","about","after","before","other","every","under","above","below"]);
+          if (commonWords.has(w)) return false;
+          return !resumeTerms.has(w);
+        });
+        // Reject if more than 3 unknown technical terms
+        const tooManyUnknowns = unknownTerms.length > 3;
+        if (tooManyUnknowns) console.log(`[recommend] Filtered hallucinated bullet: ${item.bullet.slice(0,60)}`);
+        return !tooManyUnknowns;
+      });
+    }
+
     return res.status(200).json({ recommendations });
   } catch (err) {
     console.error("Recommend error:", err);

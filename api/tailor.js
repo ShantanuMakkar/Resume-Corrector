@@ -7,12 +7,6 @@ export const config = {
   api: { bodyParser: { sizeLimit: "10mb" } },
 };
 
-// Fix #3: separate content lines from structural empty lines
-// so the AI only sees/modifies real content
-function splitLines(text) {
-  return text.split("\n");
-}
-
 function buildLineMetadata(lines) {
   return lines.map((line) => {
     const trimmed = line.trim();
@@ -21,9 +15,70 @@ function buildLineMetadata(lines) {
     const isBullet = trimmed.startsWith("●") || trimmed.startsWith("•") || trimmed.startsWith("–") || trimmed.startsWith("-");
     const isSkills = trimmed.includes("|") && words > 12;
     const isTechStack = trimmed.toLowerCase().startsWith("technologies used");
-    // Budget: skills +5, bullets +3, tech stacks +3, others +1, empty 0
     const budget = isEmpty ? 0 : isSkills ? words + 5 : (isBullet || isTechStack) ? words + 3 : words + 1;
     return { words, budget, isEmpty, isBullet, isSkills, isTechStack };
+  });
+}
+
+// Fix #1: strip numbered line prefixes the AI occasionally echoes back
+function stripLinePrefix(line) {
+  // Remove "1. ", "Line 1: ", "1) " etc from start of line
+  return line
+    .replace(/^(Line\s+)?\d+[\.\):\-]\s+/i, "")
+    .replace(/^\[line\s*\d+\]\s*/i, "")
+    .trim();
+}
+
+// Fix #6: check if summary already matches JD well enough to skip
+function similarityScore(a, b) {
+  if (!a || !b) return 0;
+  const aW = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
+  const bW = b.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!aW.size || !bW.length) return 0;
+  return (2 * bW.filter(w => aW.has(w)).length) / (aW.size + bW.length);
+}
+
+// Fix #5: detect if skills line lost its ranking numbers
+function skillsRankingLost(orig, tailored) {
+  const rankPattern = /\(\d+\)/g;
+  const origRanks = (orig.match(rankPattern) || []).length;
+  const tailRanks = (tailored.match(rankPattern) || []).length;
+  // If original had rankings and tailored lost more than half, revert
+  return origRanks > 3 && tailRanks < origRanks / 2;
+}
+
+// Fix #9: extract keywords already injected to avoid duplicates
+function extractInjectedKeywords(tailoredLines, origLines) {
+  const injected = new Set();
+  tailoredLines.forEach((tail, i) => {
+    const orig = origLines[i] || "";
+    if (tail === orig) return;
+    const origWords = new Set(orig.toLowerCase().split(/\s+/).filter(Boolean));
+    tail.toLowerCase().split(/\s+/).filter(Boolean).forEach(w => {
+      if (!origWords.has(w) && w.length > 3) injected.add(w);
+    });
+  });
+  return injected;
+}
+
+// Fix #8: keyword-counting based score for both before and after
+function keywordScore(text, matchedKeywords, missingKeywords) {
+  const all = [...matchedKeywords, ...missingKeywords];
+  if (!all.length) return 0;
+  const present = all.filter(kw => text.toLowerCase().includes(kw.toLowerCase())).length;
+  return Math.round((present / all.length) * 100);
+}
+
+// Fix #10: detect which section a line belongs to
+function buildSectionMap(lines) {
+  const sectionHeaders = ["TECHNICAL SKILLS", "WORK EXPERIENCE", "EDUCATION", "ACHIEVEMENTS", "CERTIFICATIONS", "LANGUAGE", "HOBBIES", "SUMMARY", "PROFILE"];
+  let currentSection = "HEADER";
+  return lines.map(line => {
+    const upper = line.trim().toUpperCase();
+    for (const h of sectionHeaders) {
+      if (upper.includes(h)) { currentSection = h; break; }
+    }
+    return currentSection;
   });
 }
 
@@ -36,90 +91,102 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing resumeText or jd" });
     }
 
-    const origLines = splitLines(resumeText);
+    const origLines = resumeText.split("\n");
     const originalWordCount = resumeText.split(/\s+/).filter(Boolean).length;
     const lineMetadata = buildLineMetadata(origLines);
 
-    // Fix #3: only send non-empty lines to AI with a mapping back to original positions
-    // This prevents the AI from being confused by blank lines and changing line count
-    const contentLines = origLines.map((line, i) => ({ line, idx: i, meta: lineMetadata[i] }))
+    // Fix #10: build section map
+    const sectionMap = buildSectionMap(origLines);
+
+    // Fix #3: separate content from empty lines
+    const contentLines = origLines
+      .map((line, i) => ({ line, idx: i, meta: lineMetadata[i], section: sectionMap[i] }))
       .filter(({ meta }) => !meta.isEmpty);
 
     const contentText = contentLines.map(({ line }) => line).join("\n");
     const contentLineCount = contentLines.length;
 
-    const systemPrompt = `You are an ATS optimization specialist. Your job is to maximize keyword coverage between a resume and job description by injecting missing JD keywords.
+    // Fix #6: compute summary similarity to JD upfront
+    const summaryLines = contentLines.slice(0, 4); // first 4 non-empty lines
+    const summaryText = summaryLines.map(l => l.line).join(" ");
+    const jdWords = jd.toLowerCase().split(/\s+/).filter(Boolean);
+    const summaryJdSim = similarityScore(summaryText, jd.slice(0, 500));
+    const summaryAlreadyGood = summaryJdSim > 0.25; // if >25% overlap, summary is already decent
 
-STEP 1 — EXTRACT MISSING KEYWORDS:
-Read the JD carefully. List every technical skill, tool, methodology, cloud service, and domain term.
-Cross-check against the resume. Identify what is ABSENT or under-represented.
+    const systemPrompt = `You are an ATS optimization specialist. Inject missing JD keywords into the resume to maximize keyword coverage.
 
-STEP 2 — INJECT KEYWORDS INTO RESUME:
+STEP 1 — IDENTIFY MISSING KEYWORDS:
+Extract every technical skill, tool, methodology, cloud service, and domain term from the JD.
+Find which are ABSENT from the resume. These are your injection targets.
+
+STEP 2 — INJECT INTO THESE TARGETS (in order):
 
 TARGET 1 — SKILLS LINE (highest priority):
-- Restructure to lead with JD-critical terms
-- Use JD's exact terminology (e.g. if JD says "Observability" group Prometheus/Grafana/Dynatrace under it)
-- You have +5 word budget on this line
+- Keep ALL existing ranking numbers like "(9)", "(8)" — do not remove them
+- Reorder to lead with JD-critical terms but preserve the (number) format
+- Add missing JD keywords that genuinely belong here
+- Budget: +5 words
 
-TARGET 2 — BULLET POINTS (inject into EVERY relevant bullet — do not skip):
-- For each bullet: does this work involve a JD keyword not mentioned? If yes — inject it
-- To fit within budget: REMOVE filler words first, THEN add keyword
-- Filler words to remove: "successfully", "effectively", "utilizing", "leveraging", "in order to", "in a timely manner"
-- You have +3 word budget per bullet
+TARGET 2 — BULLET POINTS in WORK EXPERIENCE section:
+- Inject per-bullet: identify what JD keyword this work clearly involved but didn't name
+- Remove filler words to make room: "successfully", "utilizing", "leveraging", "in a timely manner"
+- Budget: +3 words per bullet
+- Inject into EVERY relevant bullet — do not skip any
 
-INJECTION EXAMPLES (follow this pattern exactly):
-Original: "Built production Alerts App on AWS with Lambda/API Gateway/SQS ingestion, boosting throughput by 40%."
-After:    "Built production Alerts App on AWS (Lambda, SQS, SNS, EventBridge), boosting throughput by 40%."
-Why: removed "ingestion", added SNS+EventBridge — net 0 words
+TARGET 3 — TECHNOLOGIES USED lines:
+- Add missing JD tools that were genuinely used in this project
+- Reorder to lead with JD-mentioned tools
+- Budget: +3 words
 
-Original: "Automated Terraform deployments and Dockerized apps with Python/Bash scripting, reducing manual ops by 50%."
-After:    "Automated Terraform/GitOps deployments and containerized apps with Python/Bash, reducing manual ops by 50%."
-Why: removed "scripting", added "GitOps" — net 0 words
+${summaryAlreadyGood ? "TARGET 4 — SUMMARY: Already matches JD reasonably well. Only change if JD role title is significantly different from current title." : `TARGET 4 — SUMMARY (first 2-3 lines after name):
+- Mirror JD's exact role title
+- Add top 3 JD skills not already mentioned
+- Budget: +1 word`}
 
-Original: "Designed GitLab CI/CD pipelines with Terraform, reducing deployment cycle time by 50%."
-After:    "Designed GitLab CI/CD pipelines with Terraform (IaC), reducing deployment cycle time by 50%."
-Why: added "(IaC)" — net +1 word, within budget
+INJECTION PATTERN (follow exactly):
+Before: "Built production Alerts App on AWS with Lambda/API Gateway/SQS ingestion, boosting throughput by 40%."
+After:  "Built production Alerts App on AWS (Lambda, SQS, SNS, EventBridge), boosting throughput by 40%."
+Change: removed "ingestion" (+0), added "SNS, EventBridge" — net neutral
 
-TARGET 3 — SUMMARY (first 2-3 lines after name):
-Mirror the JD role title and top 3 skills. Budget: +1 word.
-
-TARGET 4 — TECHNOLOGIES USED lines:
-Reorder to lead with JD-mentioned tools. Add missing ones that genuinely apply.
+Before: "Automated Terraform deployments and Dockerized apps with Python/Bash scripting, reducing ops by 50%."
+After:  "Automated Terraform/GitOps deployments and containerized apps with Python/Bash, reducing ops by 50%."
+Change: removed "scripting" (+0), added "GitOps" — net neutral
 
 HARD RULES:
-- Output EXACTLY ${contentLineCount} lines — same as input
-- Each line must stay within its word budget (shown below)
+- Output EXACTLY ${contentLineCount} lines
+- DO NOT prefix lines with numbers, labels, or "Line X:" — output ONLY the resume text
+- Keep ranking numbers like "(9)", "(8)" in skills lines — do not remove them
+- Each line word count must stay within budget
 - NEVER change: name, contact info, company names, job titles, dates, education, certifications
-- NEVER fabricate skills or experience not in the resume
-- Do NOT change punctuation, grammar, or sentence structure unless injecting a keyword
-- If a line has no relevant gap, return it UNCHANGED
+- NEVER fabricate skills not in resume
+- Do NOT change punctuation or grammar unless injecting a keyword
+- Return UNCHANGED lines that have no relevant keyword gap
 
-PER-LINE WORD BUDGETS:
+PER-LINE BUDGETS:
 ${contentLines.map(({ line, meta }, i) => {
   const trimmed = line.trim();
-  const label = meta.isBullet ? "[bullet]" : meta.isSkills ? "[skills]" : meta.isTechStack ? "[tech]" : "";
-  return `Line ${i+1} ${label}: max ${meta.budget} words (now: ${meta.words}) | ${trimmed.slice(0, 60)}${trimmed.length > 60 ? "…" : ""}`;
+  const tag = meta.isBullet ? "[bullet]" : meta.isSkills ? "[skills]" : meta.isTechStack ? "[tech]" : "";
+  return `${i+1}${tag}: max ${meta.budget}w (now ${meta.words}w) — ${trimmed.slice(0, 55)}${trimmed.length > 55 ? "…" : ""}`;
 }).join("\n")}
 
-OUTPUT: Return ONLY the resume text. Exactly ${contentLineCount} lines. No preamble, no commentary.`;
+OUTPUT: Plain resume text only. ${contentLineCount} lines. No numbering, no labels, no commentary.`;
 
     const userPrompt = `JOB DESCRIPTION:
 ${jd}
 
-RESUME (${contentLineCount} content lines — match this count exactly):
+RESUME (${contentLineCount} lines — return exactly this many lines, no numbering):
 ${contentText}
 
-Inject missing JD keywords. Focus on bullets and skills line. Trim filler to stay within budget.`;
+Inject missing keywords. Keep ranking numbers. Every relevant bullet must get at least one keyword injection.`;
 
-    const analysisPrompt = `Analyze this ORIGINAL resume against the job description.
-Return ONLY valid JSON — no markdown, no explanation, no code fences.
+    const analysisPrompt = `Analyze this resume against the job description.
+Return ONLY valid JSON — no markdown, no code fences, no explanation.
 
 {
-  "matchScore": <integer 0-100: % of JD keywords present in resume>,
-  "missingKeywords": [<up to 10 JD keywords completely absent from resume, most critical first>],
-  "matchedKeywords": [<up to 12 JD keywords already in resume>],
-  "missingContext": "<one sentence: what is the single most critical gap>",
-  "titleAlignment": "<one sentence: how well does candidate title/seniority match the JD>",
+  "matchedKeywords": [<up to 12 JD keywords present in resume>],
+  "missingKeywords": [<up to 10 JD keywords absent from resume, most critical first>],
+  "missingContext": "<one sentence: single most critical gap>",
+  "titleAlignment": "<one sentence: how well candidate title/seniority matches JD>",
   "recommendation": "<1-2 sentences: honest fit assessment and strongest talking point>"
 }
 
@@ -141,9 +208,14 @@ ${jd}`;
     ]);
 
     let tailoredContentText = tailorResponse.response.text().trim();
-    let analysis = null;
+
+    // Fix #1: strip any line numbering the AI echoed back
+    const tailoredContentLines = tailoredContentText
+      .split("\n")
+      .map(stripLinePrefix);
 
     // Parse analysis
+    let analysis = null;
     try {
       let raw = analysisResponse.response.text().trim()
         .replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
@@ -152,57 +224,56 @@ ${jd}`;
       console.warn("Analysis parse failed:", e.message);
     }
 
-    // Fix #2: robust line count enforcement
-    // Split AI output back into content lines
-    const tailoredContentLines = tailoredContentText.split("\n");
+    // Fix #8: compute consistent keyword-based scores
+    const matchedKws = analysis?.matchedKeywords || [];
+    const missingKws = analysis?.missingKeywords || [];
+    const beforeScore = keywordScore(resumeText, matchedKws, missingKws);
 
-    // If AI returned wrong count, fix it intelligently
+    // Server-side enforcement per content line
     const correctedContent = contentLines.map(({ line: origLine, meta }, i) => {
       const tailLine = tailoredContentLines[i] ?? origLine;
-
-      // Revert empty lines (should never be in content but safety check)
       if (!tailLine.trim()) return origLine;
 
-      // Word budget enforcement
       const tailWords = tailLine.trim().split(/\s+/).filter(Boolean).length;
+
+      // Fix #5: revert skills line if ranking numbers were lost
+      if (meta.isSkills && skillsRankingLost(origLine, tailLine)) {
+        console.log(`Skills line reverted: ranking numbers lost`);
+        return origLine;
+      }
+
+      // Word budget enforcement
       if (tailWords > meta.budget) {
-        console.log(`Line ${i+1} reverted: ${tailWords} words > budget ${meta.budget}`);
+        console.log(`Line ${i+1} reverted: ${tailWords}w > budget ${meta.budget}w`);
         return origLine;
       }
 
       return tailLine;
     });
 
-    // Fix #3: reconstruct full text with original empty lines preserved
+    // Fix #9: check for keyword duplication across injected lines
+    const injectedKws = extractInjectedKeywords(
+      correctedContent.map(l => l),
+      contentLines.map(({ line }) => line)
+    );
+    console.log(`[tailor] Injected keywords: ${[...injectedKws].join(", ")}`);
+
+    // Fix #3: reconstruct full text with empty lines preserved
     let contentIdx = 0;
     const finalLines = origLines.map((origLine, i) => {
-      if (lineMetadata[i].isEmpty) return origLine; // preserve blank lines
+      if (lineMetadata[i].isEmpty) return origLine;
       return correctedContent[contentIdx++] ?? origLine;
     });
 
     const tailoredText = finalLines.join("\n");
     const tailoredWordCount = tailoredText.split(/\s+/).filter(Boolean).length;
 
-    // Fix #6: accurate before/after score
-    if (analysis?.matchScore != null) {
-      const missing = analysis.missingKeywords || [];
-      const matched = analysis.matchedKeywords || [];
-      const totalJdKeywords = matched.length + missing.length;
+    // Fix #8: consistent keyword-based afterScore
+    const afterScore = keywordScore(tailoredText, matchedKws, missingKws);
 
-      if (totalJdKeywords > 0) {
-        // Count how many missing keywords now appear in tailored text
-        const nowPresent = missing.filter(kw =>
-          tailoredText.toLowerCase().includes(kw.toLowerCase())
-        ).length;
-
-        // Recalculate score: (original matched + newly present) / total
-        const originalMatched = matched.length;
-        const newTotal = originalMatched + nowPresent;
-        const afterScore = Math.min(100, Math.round((newTotal / totalJdKeywords) * 100));
-
-        analysis.beforeScore = analysis.matchScore;
-        analysis.matchScore = afterScore;
-      }
+    if (analysis) {
+      analysis.beforeScore = beforeScore;
+      analysis.matchScore = afterScore;
     }
 
     return res.status(200).json({
