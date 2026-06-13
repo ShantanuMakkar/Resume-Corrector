@@ -32,15 +32,16 @@ function classifyChange(orig, tail) {
 }
 
 function computeDiff(originalText, tailoredText) {
-  const ol = originalText.split("\n").map(s => s.trim()).filter(Boolean);
-  const tl = tailoredText.split("\n").map(s => s.trim()).filter(Boolean);
+  // Use ALL lines (including empty) to preserve positional index alignment
+  const ol = originalText.split("\n").map(s => s.trim());
+  const tl = tailoredText.split("\n").map(s => s.trim());
   const results = [];
   const max = Math.max(ol.length, tl.length);
   for (let i = 0; i < max; i++) {
     const orig = ol[i] ?? "", tail = tl[i] ?? "";
     if (!orig && !tail) continue;
-    if (orig === tail || !orig || !tail) { if (orig) results.push({ type:"same", original:orig, tailored:orig }); continue; }
-    results.push({ type:"changed", changeType: classifyChange(orig,tail), original:orig, tailored:tail, ops:diffWords(orig,tail) });
+    if (orig === tail || !orig || !tail) { if (orig) results.push({ type:"same", lineIdx:i, original:orig, tailored:orig }); continue; }
+    results.push({ type:"changed", lineIdx:i, changeType: classifyChange(orig,tail), original:orig, tailored:tail, ops:diffWords(orig,tail) });
   }
   return results;
 }
@@ -61,8 +62,7 @@ function buildAcceptedText(originalText, tailoredText, accepted) {
   return ol.map((orig, i) => {
     const tail = tl[i] ?? orig;
     if (orig === tail) return orig;
-    const key = `${i}`;
-    return accepted.has(key) ? tail : orig;
+    return accepted.has(i) ? tail : orig;
   }).join("\n");
 }
 
@@ -106,6 +106,23 @@ function AnalysisPanel({ analysis }) {
   if (!analysis) return null;
   return (
     <div style={{padding:"20px",borderBottom:"1px solid #2a2a2a",display:"flex",flexDirection:"column",gap:"16px"}}>
+
+      {/* Missing keywords — most actionable, shown first */}
+      {analysis.missingKeywords?.length > 0 && (
+        <div>
+          <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#ff6b6b",marginBottom:"8px"}}>
+            Still missing from your resume
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:"6px",marginBottom: analysis.missingContext ? "8px" : 0}}>
+            {analysis.missingKeywords.map((kw,i) => (
+              <span key={i} style={{background:"rgba(255,80,80,0.1)",color:"#ff8a8a",border:"1px solid rgba(255,80,80,0.2)",borderRadius:"4px",padding:"3px 8px",fontSize:"12px"}}>{kw}</span>
+            ))}
+          </div>
+          {analysis.missingContext && <p style={{fontSize:"12px",color:"#555",lineHeight:1.5}}>{analysis.missingContext}</p>}
+        </div>
+      )}
+
+      {/* Score + alignment */}
       <div style={{display:"flex",gap:"24px",flexWrap:"wrap",alignItems:"flex-start"}}>
         {analysis.matchScore != null && <MatchScore score={analysis.matchScore} />}
         <div style={{flex:1,minWidth:"200px"}}>
@@ -114,18 +131,7 @@ function AnalysisPanel({ analysis }) {
         </div>
       </div>
 
-      {analysis.missingKeywords?.length > 0 && (
-        <div>
-          <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#ff6b6b",marginBottom:"8px"}}>Missing from your resume</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:"6px"}}>
-            {analysis.missingKeywords.map((kw,i) => (
-              <span key={i} style={{background:"rgba(255,80,80,0.1)",color:"#ff8a8a",border:"1px solid rgba(255,80,80,0.2)",borderRadius:"4px",padding:"3px 8px",fontSize:"12px"}}>{kw}</span>
-            ))}
-          </div>
-          {analysis.missingContext && <p style={{fontSize:"12px",color:"#555",marginTop:"8px",lineHeight:1.5}}>{analysis.missingContext}</p>}
-        </div>
-      )}
-
+      {/* Matched keywords */}
       {analysis.matchedKeywords?.length > 0 && (
         <div>
           <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#4ddb8a",marginBottom:"8px"}}>Matched keywords</div>
@@ -244,7 +250,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
 // ── main component ────────────────────────────────────────────────────────────
 
-export default function ResultPanel({ originalText, tailoredText, originalFile, tailorStats, analysis, jd, jobTitle, company, onRetailor, onReset }) {
+export default function ResultPanel({ originalText, tailoredText, originalFile, tailorStats, analysis, jd, onRetailor, onReset }) {
   const [view, setView] = useState("diff");
   const [building, setBuilding] = useState(false);
   const [docxUrl, setDocxUrl] = useState(null);
@@ -254,7 +260,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
   const [recsError, setRecsError] = useState("");
   const [accepted, setAccepted] = useState(null); // null = all accepted
 
-  // Pre-fetch recommendations immediately
+  // Pre-fetch recommendations immediately on mount
   useEffect(() => {
     (async () => {
       try {
@@ -277,19 +283,14 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
   const diff = computeDiff(originalText, tailoredText);
   const semantic = diff.filter(d => d.type === "changed" && d.changeType === "semantic");
   const cosmetic = diff.filter(d => d.type === "changed" && d.changeType === "cosmetic");
-  const allChangedKeys = new Set(
-    diff.filter(d => d.type === "changed").map((_, i) => {
-      const origLines = originalText.split("\n").map(s => s.trim()).filter(Boolean);
-      return String(origLines.indexOf(diff.filter(d => d.type==="changed")[i].original));
-    })
-  );
 
-  // Build accepted set — default all changes accepted
+  // Build accepted set — keyed by line index (positional, not text-based)
+  // diff entries carry their lineIdx directly
   const [acceptedKeys, setAcceptedKeys] = useState(() => {
     const keys = new Set();
     const ol = originalText.split("\n").map(s => s.trim());
     const tl = tailoredText.split("\n").map(s => s.trim());
-    ol.forEach((orig, i) => { if (orig !== (tl[i]??orig)) keys.add(String(i)); });
+    ol.forEach((orig, i) => { if (orig !== (tl[i] ?? orig)) keys.add(i); });
     return keys;
   });
 
@@ -298,17 +299,33 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
       const next = new Set(prev);
       if (next.has(lineIdx)) next.delete(lineIdx);
       else next.add(lineIdx);
-      setDocxUrl(null); // invalidate cached docx
+      setDocxUrl(null);
       return next;
     });
   }
 
-  function getLineIdx(entry) {
-    const ol = originalText.split("\n").map(s => s.trim());
-    return String(ol.indexOf(entry.original));
+  const acceptedCount = acceptedKeys.size;
+  const allChangedIndices = diff.filter(d => d.type === "changed").map(d => d.lineIdx);
+
+  function acceptAll() {
+    setAcceptedKeys(new Set(allChangedIndices));
+    setDocxUrl(null);
   }
 
-  const acceptedCount = acceptedKeys.size;
+  function rejectAll() {
+    setAcceptedKeys(new Set());
+    setDocxUrl(null);
+  }
+
+  function rejectAllCosmetic() {
+    setAcceptedKeys(prev => {
+      const next = new Set(prev);
+      diff.filter(d => d.type === "changed" && d.changeType === "cosmetic")
+        .forEach(d => next.delete(d.lineIdx));
+      setDocxUrl(null);
+      return next;
+    });
+  }
 
   async function buildDocx() {
     if (docxUrl) return docxUrl;
@@ -337,16 +354,14 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
   async function handleDownload() {
     const url = await buildDocx();
     if (url) {
-      const prefix = [company, jobTitle].filter(Boolean).join("_").replace(/\s+/g,"_") || "tailored";
-      triggerDownload(url, `${originalFile.name.replace(/\.(docx|doc)$/i,"")}-${prefix}.docx`);
+      triggerDownload(url, `${originalFile.name.replace(/\.(docx|doc)$/i,"")}-tailored.docx`);
     }
   }
 
   async function handleGoogleDocs() {
     const url = await buildDocx();
     if (!url) return;
-    const prefix = [company, jobTitle].filter(Boolean).join("_").replace(/\s+/g,"_") || "tailored";
-    triggerDownload(url, `${originalFile.name.replace(/\.(docx|doc)$/i,"")}-${prefix}.docx`);
+    triggerDownload(url, `${originalFile.name.replace(/\.(docx|doc)$/i,"")}-tailored.docx`);
     setTimeout(() => window.open("https://docs.new","_blank"), 700);
   }
 
@@ -367,11 +382,6 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
       {/* Header */}
       <div className="result-header">
         <div className="result-meta">
-          {(jobTitle || company) && (
-            <span style={{fontSize:"13px",color:"#aaa",fontWeight:500}}>
-              {[jobTitle, company].filter(Boolean).join(" · ")}
-            </span>
-          )}
           <span className="badge">{acceptedCount} change{acceptedCount!==1?"s":""} accepted</span>
           <span className="badge-sub">{tailorStats ? `${tailorStats.wordDrift > 0 ? "+" : ""}${tailorStats.wordDrift} words` : ""}</span>
         </div>
@@ -398,16 +408,35 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
       {/* Tabs */}
       <div className="tab-bar">
         <button className={`tab ${view==="diff"?"tab-active":""}`} onClick={() => setView("diff")}>
-          Changes <span className="tab-count">{semantic.length}</span>
+          Changes <span className="tab-count">{acceptedCount}</span>
         </button>
         <button className={`tab ${view==="recs"?"tab-active":""}`} onClick={() => setView("recs")}>
-          Recommendations {recsLoading && <span className="spinner spinner-sm" style={{marginLeft:6}}/>}
+          Recommendations
+          {recsLoading
+            ? <span className="spinner spinner-sm" style={{marginLeft:6,borderColor:"rgba(200,240,100,0.2)",borderTopColor:"#c8f064"}}/>
+            : recs && <span className="tab-count" style={{background:"rgba(200,240,100,0.1)",color:"#c8f064"}}>ready</span>
+          }
         </button>
       </div>
 
       {/* Diff view */}
       {view === "diff" && (
         <div className="diff-view">
+          {diff.filter(d => d.type === "changed").length > 0 && (
+            <div style={{display:"flex",gap:"8px",marginBottom:"16px",flexWrap:"wrap",alignItems:"center"}}>
+              <span style={{fontSize:"12px",color:"#555",marginRight:"4px"}}>Bulk actions:</span>
+              <button onClick={acceptAll} style={{background:"rgba(60,220,120,0.1)",border:"1px solid rgba(60,220,120,0.25)",color:"#4ddb8a",borderRadius:"5px",padding:"4px 12px",fontSize:"12px",cursor:"pointer",fontWeight:600}}>
+                ✓ Accept all
+              </button>
+              <button onClick={rejectAllCosmetic} style={{background:"rgba(255,255,255,0.03)",border:"1px solid #2a2a2a",color:"#666",borderRadius:"5px",padding:"4px 12px",fontSize:"12px",cursor:"pointer"}}>
+                Reject formatting
+              </button>
+              <button onClick={rejectAll} style={{background:"rgba(255,80,80,0.06)",border:"1px solid rgba(255,80,80,0.15)",color:"#ff6b6b",borderRadius:"5px",padding:"4px 12px",fontSize:"12px",cursor:"pointer"}}>
+                Reject all
+              </button>
+              <span style={{marginLeft:"auto",fontSize:"12px",color:"#555"}}>{acceptedCount} of {allChangedIndices.length} accepted</span>
+            </div>
+          )}
           {semantic.length === 0 && cosmetic.length === 0 ? (
             <p className="no-changes">No changes — resume already matches the JD well.</p>
           ) : (
@@ -416,7 +445,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
                 <div style={{marginBottom:"8px"}}>
                   {sectionDivider("Content changes", semantic.length, "accent")}
                   {semantic.map((entry, i) => {
-                    const idx = getLineIdx(entry);
+                    const idx = entry.lineIdx;
                     const isAccepted = acceptedKeys.has(idx);
                     return (
                       <div key={i} style={{border:`1px solid ${isAccepted?"#3a3a3a":"#222"}`,borderRadius:"8px",overflow:"hidden",marginBottom:"12px",opacity:isAccepted?1:0.5,transition:"opacity 0.2s"}}>
@@ -449,7 +478,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
                 <div>
                   {sectionDivider("Formatting & punctuation", cosmetic.length, "muted")}
                   {cosmetic.map((entry, i) => {
-                    const idx = getLineIdx(entry);
+                    const idx = entry.lineIdx;
                     const isAccepted = acceptedKeys.has(idx);
                     return (
                       <div key={i} style={{border:`1px solid ${isAccepted?"#2e2e2e":"#1e1e1e"}`,borderRadius:"8px",overflow:"hidden",marginBottom:"10px",opacity:isAccepted?0.8:0.35,transition:"opacity 0.2s"}}>

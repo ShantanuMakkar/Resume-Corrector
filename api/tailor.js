@@ -19,51 +19,72 @@ export default async function handler(req, res) {
     const origLines = resumeText.split("\n");
     const originalWordCount = resumeText.split(/\s+/).filter(Boolean).length;
 
-    const systemPrompt = `You are an ATS optimization specialist. Your job is to maximize keyword coverage between a resume and job description by injecting missing JD keywords into the resume.
+    // Build per-line word budgets — more natural for LLMs than char counts
+    // Allow bullet points up to +3 words (room for keyword injection)
+    // Skills lines are longer so allow +5 words
+    const lineMetadata = origLines.map((line, i) => {
+      const words = line.trim().split(/\s+/).filter(Boolean).length;
+      const isBullet = line.trim().startsWith("●") || line.trim().startsWith("•") || line.trim().startsWith("-");
+      const isSkills = line.includes("|") && words > 15;
+      const budget = isSkills ? words + 5 : isBullet ? words + 3 : words + 1;
+      return { words, budget, isBullet, isSkills };
+    });
 
-STEP 1 — IDENTIFY MISSING KEYWORDS:
-Extract every technical skill, tool, methodology, and domain term from the JD. Find which ones are absent or under-represented in the resume. These are your injection targets.
+    const systemPrompt = `You are an ATS optimization specialist. Maximize keyword coverage by injecting missing JD keywords into the resume.
 
-STEP 2 — INJECT KEYWORDS:
+STEP 1 — KEYWORD GAP ANALYSIS:
+Extract every technical skill, tool, methodology, and domain term from the JD.
+Find which are ABSENT or UNDER-REPRESENTED in the resume. These are your injection targets.
 
-TARGET 1 — SKILLS LINE (highest priority):
-Restructure to lead with JD-critical terms. Use JD's exact terminology. Group related tools.
+STEP 2 — INJECT KEYWORDS (3 targets in priority order):
 
-TARGET 2 — BULLET POINTS (critical — do not skip):
-For each bullet point, ask: does this work clearly involve a JD keyword that isn't mentioned?
-If yes — inject it. To make room, trim filler words like "successfully", "effectively", "in order to", "utilizing", "leveraging", or verbose phrases.
+TARGET 1 — SKILLS LINE (highest priority, most impact):
+Restructure to lead with JD-critical terms. Use JD's exact terminology.
+Group related tools (e.g. "Observability (Prometheus, Grafana, Dynatrace)").
+You have up to +5 words of budget on this line.
 
-Example of correct bullet point injection:
-Original (128c): "Built production Alerts App on AWS with Lambda/API Gateway/SQS ingestion, boosting throughput by 40% and cutting latency by 25%."
-JD has "EventBridge" and "SNS" → inject them, trim "ingestion":
-Result (124c):   "Built production Alerts App on AWS (Lambda, SQS, SNS, EventBridge), boosting throughput by 40% and cutting latency by 25%."
+TARGET 2 — BULLET POINTS (critical — inject into EVERY relevant bullet):
+For each bullet, identify JD keywords that describe work clearly happening in that bullet.
+Inject them. You have up to +3 words per bullet.
+Strategy: trim filler phrases to make room THEN add keyword.
+Filler to remove: "successfully", "effectively", "in order to", "utilizing", "leveraging", "in a timely manner", verbose prepositional phrases.
 
-Example of correct bullet point injection:
-Original: "Automated Terraform deployments and Dockerized apps with Python/Bash scripting, reducing manual ops efforts by 50%."
-JD has "GitOps" → inject it, trim "scripting":
-Result:   "Automated Terraform/GitOps deployments and containerized apps with Python/Bash, reducing manual ops efforts by 50%."
+CONCRETE EXAMPLES of correct bullet injection:
+Before: "Built production Alerts App on AWS with Lambda/API Gateway/SQS ingestion, boosting throughput by 40% and cutting latency by 25%."
+After:  "Built production Alerts App on AWS (Lambda, SQS, SNS, EventBridge), boosting throughput by 40% and cutting latency by 25%."
+(removed "ingestion", added "SNS, EventBridge" — net +1 word, keyword injected)
+
+Before: "Automated Terraform deployments and Dockerized apps with Python/Bash scripting, reducing manual ops efforts by 50%."
+After:  "Automated Terraform/GitOps deployments and containerized apps with Python/Bash, reducing manual ops efforts by 50%."
+(removed "scripting", added "GitOps" — net 0 words, keyword injected)
+
+Before: "Maintained Kubernetes (EKS) clusters with Helm and GitLab CI/CD for core banking services, achieving 99.9% uptime"
+After:  "Maintained Kubernetes (EKS) clusters with Helm/GitLab CI/CD for core banking, achieving 99.9% uptime and SLO compliance"
+(removed "services", added "SLO compliance" if JD mentions SLOs — net 0 words)
 
 TARGET 3 — SUMMARY (first 2-3 lines after name):
-Mirror the JD's exact role title and top required skills.
+Mirror JD's exact role title and top 3 required skills. Budget: +1 word.
 
 HARD RULES:
-- Output EXACTLY ${origLines.length} lines — same count as input
-- Each output line must be SAME LENGTH OR SHORTER than the corresponding input line
-- To inject a keyword into a long line: REMOVE filler words to create space first
+- Output EXACTLY ${origLines.length} lines
+- Each line's word count must stay within the per-line budget shown below
 - NEVER change: company names, job titles, dates, education, contact info, certifications
 - NEVER fabricate experience not in the resume
-- Do NOT fix grammar or punctuation — only inject keywords
-- If a line truly has no relevant keyword gap, return it UNCHANGED
+- Do NOT fix grammar, punctuation, or sentence style
+- If a line has no relevant keyword gap, return it UNCHANGED
 
-OUTPUT: Return ONLY the resume text. ${origLines.length} lines. No commentary.`;
+PER-LINE WORD BUDGETS:
+${lineMetadata.map((m, i) => `Line ${i+1}: max ${m.budget} words (current: ${m.words})`).join("\n")}
+
+OUTPUT: Return ONLY the resume text. Exactly ${origLines.length} lines. No commentary.`;
 
     const userPrompt = `JOB DESCRIPTION:
 ${jd}
 
-RESUME (${origLines.length} lines — each output line must be ≤ original line length):
+RESUME (${origLines.length} lines):
 ${resumeText}
 
-Inject missing JD keywords into the skills line AND bullet points. Trim filler words to make room.`;
+Inject missing JD keywords into skills line AND every relevant bullet point. Trim filler to make room.`;
 
     const model = client.getGenerativeModel({
       model: "gemini-2.5-flash",
@@ -73,11 +94,11 @@ Inject missing JD keywords into the skills line AND bullet points. Trim filler w
     const analysisPrompt = `Analyze this resume against the job description. Return ONLY valid JSON, no markdown:
 
 {
-  "matchScore": <0-100>,
+  "matchScore": <0-100 integer>,
+  "missingKeywords": [<JD keywords completely absent from resume, max 10, most critical first>],
   "matchedKeywords": [<top JD keywords already in resume, max 12>],
-  "missingKeywords": [<JD keywords absent from resume, max 10>],
-  "missingContext": "<one sentence on the most critical gap>",
-  "titleAlignment": "<one sentence on how well the candidate title/level matches>",
+  "missingContext": "<one sentence on the single most critical gap>",
+  "titleAlignment": "<one sentence on how well candidate title/level matches>",
   "recommendation": "<1-2 sentences: honest fit assessment and what to lead with>"
 }
 
@@ -105,16 +126,17 @@ ${jd}`;
       console.warn("Analysis parse failed:", e.message);
     }
 
-    // Server-side enforcement
+    // Server-side enforcement: word count per line
     const tailLines = tailoredText.split("\n");
     while (tailLines.length > origLines.length) tailLines.pop();
     while (tailLines.length < origLines.length) tailLines.push(origLines[tailLines.length]);
 
     const corrected = origLines.map((origLine, i) => {
       const tail = tailLines[i] ?? origLine;
-      // Allow up to 5 chars over — model should have trimmed to compensate
-      // but revert if it went significantly over without trimming
-      return tail.length > origLine.length + 5 ? origLine : tail;
+      const tailWords = tail.trim().split(/\s+/).filter(Boolean).length;
+      const budget = lineMetadata[i]?.budget ?? (origLine.trim().split(/\s+/).filter(Boolean).length + 2);
+      // Revert if word count exceeds budget
+      return tailWords > budget ? origLine : tail;
     });
 
     tailoredText = corrected.join("\n");

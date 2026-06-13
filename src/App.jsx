@@ -8,8 +8,6 @@ export default function App() {
   const [resumeFile, setResumeFile] = useState(null);
   const [resumeText, setResumeText] = useState("");
   const [jd, setJd] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
-  const [company, setCompany] = useState("");
   const [status, setStatus] = useState("idle");
   const [tailoredText, setTailoredText] = useState("");
   const [tailorStats, setTailorStats] = useState(null);
@@ -51,18 +49,23 @@ export default function App() {
   }
 
   function handleReset() {
+    // Immediately clear result state so UI snaps back to input screen
     setStatus("idle");
     setTailoredText("");
     setTailorStats(null);
     setAnalysis(null);
     setErrorMsg("");
-    setJobTitle("");
-    setCompany("");
-    // Keep resume file — user likely wants to tailor for another JD
+    setElapsed(0);
+    // Keep resume + JD — user likely wants to tailor for another JD or retry
   }
 
   function handleFullReset() {
-    handleReset();
+    setStatus("idle");
+    setTailoredText("");
+    setTailorStats(null);
+    setAnalysis(null);
+    setErrorMsg("");
+    setElapsed(0);
     setResumeFile(null);
     setResumeText("");
     setJd("");
@@ -71,8 +74,8 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <div className="logo-mark">RT</div>
-        <div>
+        <div className="logo-mark" onClick={handleFullReset} style={{cursor:"pointer"}} title="Back to home">RT</div>
+        <div style={{cursor:"pointer"}} onClick={handleFullReset}>
           <h1>Resume Tailor</h1>
           <p>80% yours. 20% theirs. 100% honest.</p>
         </div>
@@ -84,8 +87,6 @@ export default function App() {
           tailoredText={tailoredText}
           originalFile={resumeFile}
           jd={jd}
-          jobTitle={jobTitle}
-          company={company}
           tailorStats={tailorStats}
           analysis={analysis}
           onRetailor={() => handleReset()}
@@ -100,25 +101,6 @@ export default function App() {
               setResumeText(text);
             }}
           />
-
-          {/* Job meta */}
-          <div className="panel">
-            <div className="panel-label">Job Details <span style={{fontWeight:400, textTransform:"none", letterSpacing:0}}>— optional but helps track applications</span></div>
-            <div className="job-meta-row">
-              <input
-                className="meta-input"
-                placeholder="Job title  e.g. Senior DevOps Engineer"
-                value={jobTitle}
-                onChange={e => setJobTitle(e.target.value)}
-              />
-              <input
-                className="meta-input"
-                placeholder="Company  e.g. Stripe"
-                value={company}
-                onChange={e => setCompany(e.target.value)}
-              />
-            </div>
-          </div>
 
           <JDInput value={jd} onChange={setJd} />
 
