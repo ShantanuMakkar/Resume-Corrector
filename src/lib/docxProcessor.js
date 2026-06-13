@@ -232,13 +232,14 @@ export async function injectTextIntoDocx(originalFile, originalText, tailoredTex
     if (clean !== v) replacements.set(k, clean);
   }
 
-  // Fuzzy fallback for slight extraction differences
+  // Fuzzy fallback — also normalise bullet prefixes
   for (const xmlPara of xmlParas) {
     const xt = xmlPara.text;
     if (!xt || xt.split(/\s+/).length < 3 || replacements.has(xt)) continue;
+    const xtNorm = stripBulletPrefix(xt);
     let bestOrig = null, bestScore = 0;
     for (const [orig] of replacements.entries()) {
-      const s = similarity(xt, orig);
+      const s = similarity(xtNorm, stripBulletPrefix(orig));
       if (s > bestScore) { bestScore = s; bestOrig = orig; }
     }
     if (bestOrig && bestScore >= 0.85) {
