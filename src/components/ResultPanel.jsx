@@ -173,9 +173,9 @@ function DiffBlock({ entry, isAccepted, onToggle, compact }) {
           <button
             onClick={() => onToggle(idx)}
             style={{
-              background: isAccepted ? "rgba(60,220,120,0.12)" : "rgba(255,255,255,0.04)",
-              border: `1px solid ${isAccepted ? "rgba(60,220,120,0.35)" : "#2a2a2a"}`,
-              color: isAccepted ? "#4ddb8a" : "#555",
+              background: "none",
+              border: `1px solid ${isAccepted ? "#2a2a2a" : "rgba(60,220,120,0.35)"}`,
+              color: isAccepted ? "#555" : "#4ddb8a",
               borderRadius:"6px",
               padding:"5px 14px",
               fontSize:"12px",

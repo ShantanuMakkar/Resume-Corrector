@@ -132,17 +132,17 @@ export default function App() {
     return () => clearInterval(t);
   }, [status]);
 
-  // Progress simulation
+  // Progress simulation — jumps to 80% immediately, crawls to 95%
   useEffect(() => {
     if (status !== "processing") {
       if (status === "done") setProgress(100);
       else setProgress(0);
       return;
     }
-    setProgress(0);
-    let current = 0;
+    setProgress(80);
+    let current = 80;
     const tick = () => {
-      current = current < 30 ? current + 3 : current < 75 ? current + 0.6 : current < 95 ? current + 0.3 : current;
+      current = current + (95 - current) * 0.04;
       setProgress(Math.min(current, 95));
     };
     const t = setInterval(tick, 300);
