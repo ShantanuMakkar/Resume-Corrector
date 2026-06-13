@@ -7,34 +7,42 @@ export const config = {
   api: { bodyParser: { sizeLimit: "10mb" } },
 };
 
-// Auto-fallback: try gemini-2.5-flash first, fall back to gemini-2.5-flash-lite on quota errors
-function isQuotaError(err) {
+// Model cascade — tries each in order on quota/timeout/error
+const MODEL_CASCADE = [
+  { model: "gemini-2.5-flash", useThinking: true },
+  { model: "gemini-2.5-flash-lite", useThinking: false },
+  { model: "gemini-2.5-pro", useThinking: false },
+  { model: "gemini-3.1-flash-lite", useThinking: false },
+  { model: "gemini-3.5-flash", useThinking: false },
+];
+
+function shouldTryNext(err) {
   const msg = (err?.message || err?.toString() || "").toLowerCase();
-  return msg.includes("429") || msg.includes("quota") || msg.includes("resource_exhausted") || msg.includes("rate limit");
+  return msg.includes("429") || msg.includes("quota") || msg.includes("resource_exhausted") ||
+    msg.includes("rate limit") || msg.includes("timeout") || msg.includes("deadline") ||
+    msg.includes("503") || msg.includes("unavailable") || msg.includes("thinking") ||
+    msg.includes("thinkingconfig") || msg.includes("unsupported") || msg.includes("not found") ||
+    msg.includes("404") || (msg.includes("invalid") && msg.includes("config"));
 }
 
-async function generateWithFallback(primaryConfig, fallbackModelName, ...args) {
-  try {
-    const model = client.getGenerativeModel(primaryConfig);
-    return await model.generateContent(...args);
-  } catch (err) {
-    const msg = (err?.message || "").toLowerCase();
-    // Fallback on quota errors OR if thinkingConfig is not supported by this model
-    const shouldFallback = isQuotaError(err) ||
-      msg.includes("thinking") ||
-      msg.includes("thinkingconfig") ||
-      msg.includes("unsupported") ||
-      msg.includes("invalid") && msg.includes("config");
-    if (shouldFallback) {
-      console.log(`[fallback] ${primaryConfig.model} error (${err.message?.slice(0,60)}), switching to ${fallbackModelName}`);
-      // Clean config — no thinkingConfig, no systemInstruction wrapper issues
-      const fallbackConfig = { model: fallbackModelName };
-      if (primaryConfig.systemInstruction) fallbackConfig.systemInstruction = primaryConfig.systemInstruction;
-      const fallbackModel = client.getGenerativeModel(fallbackConfig);
-      return await fallbackModel.generateContent(...args);
+async function generateWithFallback(primaryConfig, _unused, ...args) {
+  let lastErr;
+  for (const { model, useThinking } of MODEL_CASCADE) {
+    try {
+      const config = { model };
+      if (useThinking) config.generationConfig = { thinkingConfig: { thinkingBudget: 0 } };
+      if (primaryConfig.systemInstruction) config.systemInstruction = primaryConfig.systemInstruction;
+      console.log(`[cascade] Trying ${model}...`);
+      const result = await client.getGenerativeModel(config).generateContent(...args);
+      console.log(`[cascade] Success with ${model}`);
+      return result;
+    } catch (err) {
+      lastErr = err;
+      if (shouldTryNext(err)) { console.log(`[cascade] ${model} failed, trying next...`); continue; }
+      throw err;
     }
-    throw err;
   }
+  throw lastErr;
 }
 
 export default async function handler(req, res) {
