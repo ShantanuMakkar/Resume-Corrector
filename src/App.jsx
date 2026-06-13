@@ -3,6 +3,7 @@ import ResumeUpload from "./components/ResumeUpload";
 import JDInput from "./components/JDInput";
 import ResultPanel from "./components/ResultPanel";
 import "./App.css";
+import TestPanel from "./components/TestPanel";
 
 function WhatYouGet() {
   const items = [
@@ -229,16 +230,26 @@ export default function App() {
       </header>
 
       {status === "done" ? (
-        <ResultPanel
-          originalText={resumeText}
-          tailoredText={tailoredText}
-          originalFile={resumeFile}
-          jd={jd}
-          tailorStats={tailorStats}
-          analysis={analysis}
-          onRetailor={handleReset}
-          onReset={handleFullReset}
-        />
+        <>
+          <ResultPanel
+            originalText={resumeText}
+            tailoredText={tailoredText}
+            originalFile={resumeFile}
+            jd={jd}
+            tailorStats={tailorStats}
+            analysis={analysis}
+            onRetailor={handleReset}
+            onReset={handleFullReset}
+          />
+          <TestPanel
+            resumeText={resumeText}
+            tailoredText={tailoredText}
+            analysis={analysis}
+            tailorStats={tailorStats}
+            originalFile={resumeFile}
+            jd={jd}
+          />
+        </>
       ) : (
         <main className="main-grid">
           {!resumeFile && <HowItWorks />}
