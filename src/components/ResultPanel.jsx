@@ -31,17 +31,63 @@ function classifyChange(orig, tail) {
   return "semantic";
 }
 
+function similarity(a, b) {
+  if (!a || !b) return 0;
+  const aW = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
+  const bW = b.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!aW.size || !bW.length) return 0;
+  return (2 * bW.filter(w => aW.has(w)).length) / (aW.size + bW.length);
+}
+
 function computeDiff(originalText, tailoredText) {
-  const ol = originalText.split("\n").map(s => s.trim());
-  const tl = tailoredText.split("\n").map(s => s.trim());
+  const ol = originalText.split("\n").map(s => s.trim()).filter(Boolean);
+  const tl = tailoredText.split("\n").map(s => s.trim()).filter(Boolean);
   const results = [];
-  const max = Math.max(ol.length, tl.length);
-  for (let i = 0; i < max; i++) {
-    const orig = ol[i] ?? "", tail = tl[i] ?? "";
-    if (!orig && !tail) continue;
-    if (orig === tail || !orig || !tail) { if (orig) results.push({ type:"same", lineIdx:i, original:orig, tailored:orig }); continue; }
-    results.push({ type:"changed", lineIdx:i, changeType:classifyChange(orig,tail), original:orig, tailored:tail, ops:diffWords(orig,tail) });
-  }
+
+  // Match each original line to its best tailored counterpart
+  // within a positional window — prevents contact info matching bullets
+  const usedTail = new Set();
+
+  ol.forEach((orig, i) => {
+    if (!orig) return;
+
+    // First try exact match at same position
+    if (tl[i] !== undefined && !usedTail.has(i)) {
+      if (tl[i] === orig) {
+        results.push({ type:"same", lineIdx:i, original:orig, tailored:orig });
+        usedTail.add(i);
+        return;
+      }
+      // Check similarity at same position — if high enough, it's the right pair
+      if (similarity(orig, tl[i]) >= 0.4) {
+        usedTail.add(i);
+        results.push({ type:"changed", lineIdx:i, changeType:classifyChange(orig,tl[i]), original:orig, tailored:tl[i], ops:diffWords(orig,tl[i]) });
+        return;
+      }
+    }
+
+    // Search window ±3 for best match
+    const window = 3;
+    let bestIdx = -1, bestScore = 0;
+    for (let j = Math.max(0, i-window); j <= Math.min(tl.length-1, i+window); j++) {
+      if (usedTail.has(j)) continue;
+      const s = similarity(orig, tl[j]);
+      if (s > bestScore) { bestScore = s; bestIdx = j; }
+    }
+
+    if (bestIdx >= 0 && bestScore >= 0.5) {
+      usedTail.add(bestIdx);
+      if (orig === tl[bestIdx]) {
+        results.push({ type:"same", lineIdx:i, original:orig, tailored:orig });
+      } else {
+        results.push({ type:"changed", lineIdx:i, changeType:classifyChange(orig,tl[bestIdx]), original:orig, tailored:tl[bestIdx], ops:diffWords(orig,tl[bestIdx]) });
+      }
+    } else {
+      // No good match found — unchanged
+      results.push({ type:"same", lineIdx:i, original:orig, tailored:orig });
+    }
+  });
+
   return results;
 }
 
