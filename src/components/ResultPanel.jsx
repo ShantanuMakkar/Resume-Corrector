@@ -139,7 +139,7 @@ function DiffBlock({ entry, isAccepted, onToggle, compact }) {
               minWidth:"90px",
             }}
           >
-            {isAccepted ? "✓ Accepted" : "Rejected"}
+            {isAccepted ? "✓ Included" : "Excluded"}
           </button>
         </div>
       </div>
@@ -468,7 +468,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
 
       <div className="result-header" style={{borderBottom:"1px solid #1a1a1a"}}>
         <div className="result-meta">
-          <span className="badge">{acceptedCount} change{acceptedCount!==1?"s":""} accepted</span>
+          <span className="badge">{acceptedCount} change{acceptedCount!==1?"s":""} ready</span>
           {tailorStats?.wordDrift !== 0 && tailorStats && (
             <span className="badge-sub" style={{color:Math.abs(tailorStats.wordDrift)>25?"#ff8a8a":"#666"}}>
               {tailorStats.wordDrift>0?"+":""}{tailorStats.wordDrift} words
@@ -543,7 +543,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
           {/* Fix #13: empty state when all rejected */}
           {allChangedIndices.length > 0 && acceptedCount === 0 && (
             <div style={{textAlign:"center",padding:"32px 20px",color:"#555",fontSize:"13px",border:"1px dashed #222",borderRadius:"8px",marginBottom:"16px"}}>
-              All changes rejected — download will be identical to your original.
+              All changes excluded — download will be identical to your original.
               <br/>
               <button onClick={acceptAll} style={{marginTop:"12px",background:"none",border:"1px solid #444",color:"#888",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer"}}>
                 Accept all
