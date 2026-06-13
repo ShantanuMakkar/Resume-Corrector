@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { injectTextIntoDocx } from "../lib/docxProcessor";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 function diffWords(a, b) {
   const at = a.split(/(\s+)/).filter(Boolean);
@@ -32,7 +32,6 @@ function classifyChange(orig, tail) {
 }
 
 function computeDiff(originalText, tailoredText) {
-  // Use ALL lines (including empty) to preserve positional index alignment
   const ol = originalText.split("\n").map(s => s.trim());
   const tl = tailoredText.split("\n").map(s => s.trim());
   const results = [];
@@ -41,61 +40,130 @@ function computeDiff(originalText, tailoredText) {
     const orig = ol[i] ?? "", tail = tl[i] ?? "";
     if (!orig && !tail) continue;
     if (orig === tail || !orig || !tail) { if (orig) results.push({ type:"same", lineIdx:i, original:orig, tailored:orig }); continue; }
-    results.push({ type:"changed", lineIdx:i, changeType: classifyChange(orig,tail), original:orig, tailored:tail, ops:diffWords(orig,tail) });
+    results.push({ type:"changed", lineIdx:i, changeType:classifyChange(orig,tail), original:orig, tailored:tail, ops:diffWords(orig,tail) });
   }
   return results;
 }
 
 function renderOps(ops, side) {
   return ops.map((tok, i) => {
-    if (tok.type === "same") return <span key={i} style={{color: side==="del"?"#999":"#ccc"}}>{tok.a||tok.b}</span>;
-    if (side==="del" && tok.type==="del") return <span key={i} style={{background:"rgba(255,80,80,0.25)",color:"#ff9090",borderRadius:"3px",padding:"1px 3px",textDecoration:"line-through",textDecorationColor:"rgba(255,80,80,0.6)"}}>{tok.a}</span>;
-    if (side==="add" && tok.type==="ins") return <span key={i} style={{background:"rgba(60,220,120,0.2)",color:"#50e898",borderRadius:"3px",padding:"1px 3px",fontWeight:500}}>{tok.b}</span>;
+    if (tok.type === "same") return <span key={i} style={{color:side==="del"?"#888":"#ccc"}}>{tok.a||tok.b}</span>;
+    if (side==="del" && tok.type==="del") return <span key={i} style={{background:"rgba(255,80,80,0.2)",color:"#ff9090",borderRadius:"3px",padding:"1px 4px",textDecoration:"line-through",textDecorationColor:"rgba(255,80,80,0.5)"}}>{tok.a}</span>;
+    if (side==="add" && tok.type==="ins") return <span key={i} style={{background:"rgba(60,220,120,0.18)",color:"#4ddb8a",borderRadius:"3px",padding:"1px 4px",fontWeight:600}}>{tok.b}</span>;
     return null;
   });
 }
 
-// Build tailored text with only accepted changes applied
 function buildAcceptedText(originalText, tailoredText, accepted) {
   const ol = originalText.split("\n").map(s => s.trim());
   const tl = tailoredText.split("\n").map(s => s.trim());
   return ol.map((orig, i) => {
     const tail = tl[i] ?? orig;
-    if (orig === tail) return orig;
-    return accepted.has(i) ? tail : orig;
+    return orig === tail ? orig : accepted.has(i) ? tail : orig;
   }).join("\n");
 }
 
-// ── sub-components ────────────────────────────────────────────────────────────
-
-function CopyBtn({ text }) {
+// ── shared button style ────────────────────────────────────────────────────────
+// Fix #9: consistent copy button across all panels
+function CopyBtn({ text, size = "sm" }) {
   const [copied, setCopied] = useState(false);
+  const p = size === "sm" ? "3px 8px" : "5px 12px";
   return (
     <button
       onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-      style={{ background:"none", border:"1px solid #333", color: copied?"#4ddb8a":"#555", borderRadius:"5px", padding:"3px 9px", fontSize:"11px", cursor:"pointer", transition:"color 0.2s", flexShrink:0 }}
+      style={{background:"none",border:"1px solid #2e2e2e",color:copied?"#4ddb8a":"#444",borderRadius:"5px",padding:p,fontSize:"11px",cursor:"pointer",transition:"all 0.15s",flexShrink:0,whiteSpace:"nowrap"}}
     >
-      {copied ? "Copied" : "Copy"}
+      {copied ? "✓ Copied" : "Copy"}
     </button>
   );
 }
 
+// ── section divider ────────────────────────────────────────────────────────────
+// Fix #2: stronger visual weight for section labels
+function SectionDivider({ label, count, accent }) {
+  const c = accent ? "#c8f064" : "#3a3a3a";
+  const bg = accent ? "rgba(200,240,100,0.15)" : "#252525";
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:"10px",margin:"8px 0 14px"}}>
+      <div style={{flex:1,height:"1px",background:bg}}/>
+      <div style={{display:"flex",alignItems:"center",gap:"7px"}}>
+        <span style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:c}}>{label}</span>
+        <span style={{background:accent?"rgba(200,240,100,0.12)":"#1e1e1e",color:accent?"#c8f064":"#444",borderRadius:"10px",padding:"1px 7px",fontSize:"10px",fontWeight:600}}>{count}</span>
+      </div>
+      <div style={{flex:1,height:"1px",background:bg}}/>
+    </div>
+  );
+}
+
+// ── diff block ─────────────────────────────────────────────────────────────────
+// Fix #3: remove Before/After labels — colour communicates direction
+// Fix #4: consistent horizontal padding
+// Fix #8: larger hit area on accept/reject
+function DiffBlock({ entry, isAccepted, onToggle, compact }) {
+  const idx = entry.lineIdx;
+  return (
+    <div style={{
+      border:`1px solid ${isAccepted ? (compact?"#2a2a2a":"#363636") : "#1a1a1a"}`,
+      borderRadius:"8px",overflow:"hidden",
+      marginBottom: compact ? "8px" : "12px",
+      opacity: isAccepted ? 1 : 0.4,
+      transition:"opacity 0.2s, border-color 0.2s",
+    }}>
+      {/* Red row — before */}
+      <div style={{background:"rgba(255,50,50,0.07)",padding:"10px 14px",fontSize: compact?"12px":"13px",lineHeight:1.6,color:"#999",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
+        {renderOps(entry.ops,"del")}
+      </div>
+      {/* Green row — after */}
+      <div style={{background:"rgba(40,180,90,0.07)",borderTop:"1px solid #1e1e1e"}}>
+        <div style={{padding:"10px 14px",fontSize:compact?"12px":"13px",lineHeight:1.6,color:"#ddd",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
+          {renderOps(entry.ops,"add")}
+        </div>
+        {/* Actions row */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"6px 14px 8px",borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+          <div style={{display:"flex",gap:"6px"}}>
+            <CopyBtn text={entry.tailored}/>
+          </div>
+          {/* Fix #8: bigger tap target */}
+          <button
+            onClick={() => onToggle(idx)}
+            style={{
+              background: isAccepted ? "rgba(60,220,120,0.12)" : "rgba(255,255,255,0.04)",
+              border: `1px solid ${isAccepted ? "rgba(60,220,120,0.35)" : "#2a2a2a"}`,
+              color: isAccepted ? "#4ddb8a" : "#555",
+              borderRadius:"6px",
+              padding:"5px 14px",
+              fontSize:"12px",
+              fontWeight:600,
+              cursor:"pointer",
+              transition:"all 0.15s",
+              minWidth:"90px",
+            }}
+          >
+            {isAccepted ? "✓ Accepted" : "Rejected"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── analysis panel ─────────────────────────────────────────────────────────────
 function MatchScore({ score }) {
   const color = score >= 75 ? "#4ddb8a" : score >= 50 ? "#f0c040" : "#ff6b6b";
-  const r = 28, circ = 2 * Math.PI * r, dash = (score/100)*circ;
+  const r = 26, circ = 2 * Math.PI * r, dash = (score/100)*circ;
   return (
-    <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-      <svg width="72" height="72" viewBox="0 0 72 72">
-        <circle cx="36" cy="36" r={r} fill="none" stroke="#2a2a2a" strokeWidth="6"/>
-        <circle cx="36" cy="36" r={r} fill="none" stroke={color} strokeWidth="6"
+    <div style={{display:"flex",alignItems:"center",gap:"12px",flexShrink:0}}>
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <circle cx="32" cy="32" r={r} fill="none" stroke="#222" strokeWidth="5"/>
+        <circle cx="32" cy="32" r={r} fill="none" stroke={color} strokeWidth="5"
           strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
-          transform="rotate(-90 36 36)" style={{transition:"stroke-dasharray 0.6s ease"}}/>
-        <text x="36" y="41" textAnchor="middle" fill={color} fontSize="16" fontWeight="700">{score}%</text>
+          transform="rotate(-90 32 32)" style={{transition:"stroke-dasharray 0.8s ease"}}/>
+        <text x="32" y="37" textAnchor="middle" fill={color} fontSize="14" fontWeight="700">{score}%</text>
       </svg>
       <div>
-        <div style={{fontSize:"14px",fontWeight:600,color:"#e8e8e8"}}>JD Match</div>
-        <div style={{fontSize:"12px",color:"#666",marginTop:"2px"}}>
-          {score >= 75 ? "Strong fit for this role" : score >= 50 ? "Moderate fit for this role" : "Weak fit for this role"}
+        <div style={{fontSize:"13px",fontWeight:600,color:"#ddd"}}>JD Match</div>
+        <div style={{fontSize:"12px",color:"#555",marginTop:"2px"}}>
+          {score >= 75 ? "Strong fit" : score >= 50 ? "Moderate fit" : "Weak fit"}
         </div>
       </div>
     </div>
@@ -105,39 +173,32 @@ function MatchScore({ score }) {
 function AnalysisPanel({ analysis }) {
   if (!analysis) return null;
   return (
-    <div style={{padding:"20px",borderBottom:"1px solid #2a2a2a",display:"flex",flexDirection:"column",gap:"16px"}}>
-
-      {/* Missing keywords — most actionable, shown first */}
+    <div style={{padding:"18px 20px",borderBottom:"1px solid #1e1e1e",display:"flex",flexDirection:"column",gap:"14px"}}>
+      {/* Fix #B2: missing keywords first */}
       {analysis.missingKeywords?.length > 0 && (
         <div>
-          <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#ff6b6b",marginBottom:"8px"}}>
-            Still missing from your resume
-          </div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:"6px",marginBottom: analysis.missingContext ? "8px" : 0}}>
+          <div style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#cc4444",marginBottom:"8px"}}>Still missing</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:"5px"}}>
             {analysis.missingKeywords.map((kw,i) => (
-              <span key={i} style={{background:"rgba(255,80,80,0.1)",color:"#ff8a8a",border:"1px solid rgba(255,80,80,0.2)",borderRadius:"4px",padding:"3px 8px",fontSize:"12px"}}>{kw}</span>
+              <span key={i} style={{background:"rgba(255,60,60,0.09)",color:"#ff8a8a",border:"1px solid rgba(255,60,60,0.18)",borderRadius:"4px",padding:"3px 8px",fontSize:"12px"}}>{kw}</span>
             ))}
           </div>
-          {analysis.missingContext && <p style={{fontSize:"12px",color:"#555",lineHeight:1.5}}>{analysis.missingContext}</p>}
+          {analysis.missingContext && <p style={{fontSize:"12px",color:"#444",marginTop:"7px",lineHeight:1.5}}>{analysis.missingContext}</p>}
         </div>
       )}
-
-      {/* Score + alignment */}
-      <div style={{display:"flex",gap:"24px",flexWrap:"wrap",alignItems:"flex-start"}}>
-        {analysis.matchScore != null && <MatchScore score={analysis.matchScore} />}
-        <div style={{flex:1,minWidth:"200px"}}>
-          {analysis.titleAlignment && <p style={{fontSize:"13px",color:"#bbb",marginBottom:"8px",lineHeight:1.5}}>{analysis.titleAlignment}</p>}
-          {analysis.recommendation && <p style={{fontSize:"13px",color:"#777",lineHeight:1.5,fontStyle:"italic"}}>{analysis.recommendation}</p>}
+      <div style={{display:"flex",gap:"20px",flexWrap:"wrap",alignItems:"flex-start"}}>
+        {analysis.matchScore != null && <MatchScore score={analysis.matchScore}/>}
+        <div style={{flex:1,minWidth:"180px"}}>
+          {analysis.titleAlignment && <p style={{fontSize:"13px",color:"#aaa",marginBottom:"6px",lineHeight:1.5}}>{analysis.titleAlignment}</p>}
+          {analysis.recommendation && <p style={{fontSize:"12px",color:"#555",lineHeight:1.5,fontStyle:"italic"}}>{analysis.recommendation}</p>}
         </div>
       </div>
-
-      {/* Matched keywords */}
       {analysis.matchedKeywords?.length > 0 && (
         <div>
-          <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#4ddb8a",marginBottom:"8px"}}>Matched keywords</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:"6px"}}>
+          <div style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#2a7a4a",marginBottom:"7px"}}>Matched</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:"5px"}}>
             {analysis.matchedKeywords.map((kw,i) => (
-              <span key={i} style={{background:"rgba(60,220,120,0.1)",color:"#6feaaa",border:"1px solid rgba(60,220,120,0.2)",borderRadius:"4px",padding:"3px 8px",fontSize:"12px"}}>{kw}</span>
+              <span key={i} style={{background:"rgba(40,180,90,0.08)",color:"#5acd8a",border:"1px solid rgba(40,180,90,0.18)",borderRadius:"4px",padding:"3px 8px",fontSize:"12px"}}>{kw}</span>
             ))}
           </div>
         </div>
@@ -146,28 +207,47 @@ function AnalysisPanel({ analysis }) {
   );
 }
 
-function RecommendationsPanel({ recs, recsLoading, recsError }) {
-  if (recsLoading) return (
-    <div style={{padding:"40px 20px",display:"flex",alignItems:"center",gap:"12px",color:"#888"}}>
-      <span className="spinner" style={{borderColor:"rgba(200,240,100,0.2)",borderTopColor:"#c8f064"}}/>
-      Analyzing your profile against the JD…
+// ── recommendations panel ──────────────────────────────────────────────────────
+// Fix #15: loading skeleton instead of open spinner
+function RecsSkeleton() {
+  const bar = (w, o=1) => <div style={{height:"12px",borderRadius:"4px",background:"#1e1e1e",width:w,opacity:o,marginBottom:"6px"}}/>;
+  return (
+    <div style={{padding:"20px",display:"flex",flexDirection:"column",gap:"20px"}}>
+      {[1,2,3].map(k => (
+        <div key={k}>
+          {bar("60px")}
+          <div style={{background:"#141414",border:"1px solid #1e1e1e",borderRadius:"8px",padding:"14px",marginTop:"8px"}}>
+            {bar("100%")} {bar("85%",0.6)} {bar("70%",0.4)}
+          </div>
+          <div style={{background:"#141414",border:"1px solid #1e1e1e",borderRadius:"8px",padding:"14px",marginTop:"6px"}}>
+            {bar("100%")} {bar("90%",0.6)}
+          </div>
+        </div>
+      ))}
     </div>
   );
-  if (recsError) return <div style={{padding:"20px"}}><p style={{color:"#ff8a8a",fontSize:"13px"}}>{recsError}</p></div>;
+}
+
+function RecommendationsPanel({ recs, recsLoading, recsError }) {
+  if (recsLoading) return <RecsSkeleton/>;
+  if (recsError) return <div style={{padding:"20px"}}><p style={{color:"#ff6b6b",fontSize:"13px"}}>{recsError}</p></div>;
   if (!recs) return null;
 
-  const sev = { high:"#ff6b6b", medium:"#f0c040", low:"#888" };
+  const sev = { high:"#ff6b6b", medium:"#f0c040", low:"#555" };
+  const secLabel = (label, color) => (
+    <div style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color,marginBottom:"10px"}}>{label}</div>
+  );
 
   return (
-    <div style={{padding:"20px",display:"flex",flexDirection:"column",gap:"24px",maxHeight:"600px",overflowY:"auto"}}>
+    <div style={{padding:"20px",display:"flex",flexDirection:"column",gap:"22px",maxHeight:"600px",overflowY:"auto"}}>
 
       {recs.coverLetterHooks?.length > 0 && (
         <div>
-          <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#c8f064",marginBottom:"10px"}}>Cover letter / interview hooks</div>
-          <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+          {secLabel("Cover letter hooks", "#c8f064")}
+          <div style={{display:"flex",flexDirection:"column",gap:"7px"}}>
             {recs.coverLetterHooks.map((hook,i) => (
               <div key={i} style={{display:"flex",alignItems:"flex-start",gap:"8px"}}>
-                <div style={{flex:1,background:"rgba(200,240,100,0.06)",border:"1px solid rgba(200,240,100,0.15)",borderRadius:"7px",padding:"10px 14px",fontSize:"13px",color:"#ddd",lineHeight:1.55}}>{hook}</div>
+                <div style={{flex:1,background:"rgba(200,240,100,0.05)",border:"1px solid rgba(200,240,100,0.12)",borderRadius:"7px",padding:"10px 14px",fontSize:"13px",color:"#ccc",lineHeight:1.55}}>{hook}</div>
                 <CopyBtn text={hook}/>
               </div>
             ))}
@@ -177,16 +257,16 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
       {recs.suggestedBullets?.length > 0 && (
         <div>
-          <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#4ddb8a",marginBottom:"10px"}}>Bullet points you could add</div>
-          <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+          {secLabel("Bullets you could add", "#4ddb8a")}
+          <div style={{display:"flex",flexDirection:"column",gap:"9px"}}>
             {recs.suggestedBullets.map((item,i) => (
-              <div key={i} style={{background:"rgba(60,220,120,0.05)",border:"1px solid rgba(60,220,120,0.15)",borderRadius:"7px",padding:"12px 14px"}}>
-                <div style={{display:"flex",alignItems:"flex-start",gap:"8px",marginBottom:"6px"}}>
-                  <div style={{flex:1,fontSize:"13px",color:"#e0e0e0",lineHeight:1.55}}>• {item.bullet}</div>
+              <div key={i} style={{background:"rgba(40,180,90,0.05)",border:"1px solid rgba(40,180,90,0.12)",borderRadius:"7px",padding:"12px 14px"}}>
+                <div style={{display:"flex",alignItems:"flex-start",gap:"8px",marginBottom:"7px"}}>
+                  <div style={{flex:1,fontSize:"13px",color:"#ddd",lineHeight:1.55}}>• {item.bullet}</div>
                   <CopyBtn text={item.bullet}/>
                 </div>
                 <div style={{fontSize:"11px",color:"#4ddb8a",fontWeight:600,marginBottom:"3px"}}>{item.section}</div>
-                <div style={{fontSize:"12px",color:"#555",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
+                <div style={{fontSize:"12px",color:"#444",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
               </div>
             ))}
           </div>
@@ -195,16 +275,16 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
       {recs.framingSuggestions?.length > 0 && (
         <div>
-          <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#7eb8ff",marginBottom:"10px"}}>Reframe existing bullets</div>
-          <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+          {secLabel("Reframe these bullets", "#7eb8ff")}
+          <div style={{display:"flex",flexDirection:"column",gap:"9px"}}>
             {recs.framingSuggestions.map((item,i) => (
-              <div key={i} style={{background:"rgba(100,150,255,0.05)",border:"1px solid rgba(100,150,255,0.15)",borderRadius:"7px",padding:"12px 14px"}}>
-                <div style={{fontSize:"12px",color:"#555",textDecoration:"line-through",marginBottom:"6px",lineHeight:1.4}}>{item.current}</div>
-                <div style={{display:"flex",alignItems:"flex-start",gap:"8px",marginBottom:"6px"}}>
+              <div key={i} style={{background:"rgba(100,150,255,0.04)",border:"1px solid rgba(100,150,255,0.12)",borderRadius:"7px",padding:"12px 14px"}}>
+                <div style={{fontSize:"12px",color:"#444",textDecoration:"line-through",marginBottom:"7px",lineHeight:1.4}}>{item.current}</div>
+                <div style={{display:"flex",alignItems:"flex-start",gap:"8px",marginBottom:"7px"}}>
                   <div style={{flex:1,fontSize:"13px",color:"#a8c8ff",lineHeight:1.55}}>→ {item.reframe}</div>
                   <CopyBtn text={item.reframe}/>
                 </div>
-                <div style={{fontSize:"12px",color:"#444",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
+                <div style={{fontSize:"12px",color:"#3a3a3a",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
               </div>
             ))}
           </div>
@@ -213,15 +293,15 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
       {recs.skillsToAdd?.length > 0 && (
         <div>
-          <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#f0c040",marginBottom:"10px"}}>Skills you have but didn't list</div>
-          <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+          {secLabel("Skills you have but didn't list", "#f0c040")}
+          <div style={{display:"flex",flexDirection:"column",gap:"7px"}}>
             {recs.skillsToAdd.map((item,i) => (
-              <div key={i} style={{background:"rgba(240,192,64,0.05)",border:"1px solid rgba(240,192,64,0.15)",borderRadius:"7px",padding:"10px 14px"}}>
+              <div key={i} style={{background:"rgba(240,192,64,0.04)",border:"1px solid rgba(240,192,64,0.12)",borderRadius:"7px",padding:"10px 14px"}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"4px"}}>
                   <span style={{fontSize:"13px",color:"#f0c040",fontWeight:600}}>{item.skill}</span>
                   <CopyBtn text={item.skill}/>
                 </div>
-                <div style={{fontSize:"12px",color:"#555",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
+                <div style={{fontSize:"12px",color:"#444",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
               </div>
             ))}
           </div>
@@ -230,15 +310,15 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
       {recs.genuineGaps?.length > 0 && (
         <div>
-          <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#ff6b6b",marginBottom:"10px"}}>Genuine gaps</div>
-          <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+          {secLabel("Genuine gaps", "#ff6b6b")}
+          <div style={{display:"flex",flexDirection:"column",gap:"7px"}}>
             {recs.genuineGaps.map((item,i) => (
-              <div key={i} style={{background:"rgba(255,80,80,0.05)",border:"1px solid rgba(255,80,80,0.15)",borderRadius:"7px",padding:"10px 14px"}}>
-                <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"4px"}}>
+              <div key={i} style={{background:"rgba(255,60,60,0.04)",border:"1px solid rgba(255,60,60,0.12)",borderRadius:"7px",padding:"10px 14px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"5px"}}>
                   <span style={{fontSize:"13px",color:"#ff8a8a",fontWeight:600}}>{item.gap}</span>
-                  <span style={{fontSize:"10px",fontWeight:700,color:sev[item.severity]||"#888",background:"rgba(0,0,0,0.3)",borderRadius:"3px",padding:"1px 6px",textTransform:"uppercase"}}>{item.severity}</span>
+                  <span style={{fontSize:"10px",fontWeight:700,color:sev[item.severity]||"#555",background:"rgba(0,0,0,0.25)",borderRadius:"3px",padding:"1px 6px",letterSpacing:"0.05em"}}>{item.severity}</span>
                 </div>
-                <div style={{fontSize:"12px",color:"#555",lineHeight:1.4,fontStyle:"italic"}}>{item.suggestion}</div>
+                <div style={{fontSize:"12px",color:"#444",lineHeight:1.4,fontStyle:"italic"}}>{item.suggestion}</div>
               </div>
             ))}
           </div>
@@ -248,7 +328,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
   );
 }
 
-// ── main component ────────────────────────────────────────────────────────────
+// ── main ───────────────────────────────────────────────────────────────────────
 
 export default function ResultPanel({ originalText, tailoredText, originalFile, tailorStats, analysis, jd, onRetailor, onReset }) {
   const [view, setView] = useState("diff");
@@ -258,16 +338,14 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
   const [recs, setRecs] = useState(null);
   const [recsLoading, setRecsLoading] = useState(true);
   const [recsError, setRecsError] = useState("");
-  const [accepted, setAccepted] = useState(null); // null = all accepted
 
-  // Pre-fetch recommendations immediately on mount
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch("/api/recommend", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ resumeText: originalText, jd }),
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({ resumeText:originalText, jd }),
         });
         if (!res.ok) throw new Error("Failed");
         const data = await res.json();
@@ -281,47 +359,36 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
   }, []);
 
   const diff = computeDiff(originalText, tailoredText);
-  const semantic = diff.filter(d => d.type === "changed" && d.changeType === "semantic");
-  const cosmetic = diff.filter(d => d.type === "changed" && d.changeType === "cosmetic");
+  const semantic = diff.filter(d => d.type==="changed" && d.changeType==="semantic");
+  const cosmetic = diff.filter(d => d.type==="changed" && d.changeType==="cosmetic");
+  const allChangedIndices = diff.filter(d => d.type==="changed").map(d => d.lineIdx);
 
-  // Build accepted set — keyed by line index (positional, not text-based)
-  // diff entries carry their lineIdx directly
   const [acceptedKeys, setAcceptedKeys] = useState(() => {
     const keys = new Set();
     const ol = originalText.split("\n").map(s => s.trim());
     const tl = tailoredText.split("\n").map(s => s.trim());
-    ol.forEach((orig, i) => { if (orig !== (tl[i] ?? orig)) keys.add(i); });
+    ol.forEach((orig, i) => { if (orig !== (tl[i]??orig)) keys.add(i); });
     return keys;
   });
 
-  function toggleAccept(lineIdx) {
+  function toggleAccept(idx) {
     setAcceptedKeys(prev => {
       const next = new Set(prev);
-      if (next.has(lineIdx)) next.delete(lineIdx);
-      else next.add(lineIdx);
+      next.has(idx) ? next.delete(idx) : next.add(idx);
       setDocxUrl(null);
       return next;
     });
   }
 
   const acceptedCount = acceptedKeys.size;
-  const allChangedIndices = diff.filter(d => d.type === "changed").map(d => d.lineIdx);
 
-  function acceptAll() {
-    setAcceptedKeys(new Set(allChangedIndices));
-    setDocxUrl(null);
-  }
-
-  function rejectAll() {
-    setAcceptedKeys(new Set());
-    setDocxUrl(null);
-  }
-
+  // Fix #12: consistent bulk action hierarchy
+  function acceptAll() { setAcceptedKeys(new Set(allChangedIndices)); setDocxUrl(null); }
+  function rejectAll() { setAcceptedKeys(new Set()); setDocxUrl(null); }
   function rejectAllCosmetic() {
     setAcceptedKeys(prev => {
       const next = new Set(prev);
-      diff.filter(d => d.type === "changed" && d.changeType === "cosmetic")
-        .forEach(d => next.delete(d.lineIdx));
+      cosmetic.forEach(d => next.delete(d.lineIdx));
       setDocxUrl(null);
       return next;
     });
@@ -329,8 +396,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
 
   async function buildDocx() {
     if (docxUrl) return docxUrl;
-    setBuilding(true);
-    setBuildError("");
+    setBuilding(true); setBuildError("");
     try {
       const finalText = buildAcceptedText(originalText, tailoredText, acceptedKeys);
       const buf = await injectTextIntoDocx(originalFile, originalText, finalText);
@@ -341,9 +407,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
     } catch (err) {
       setBuildError("Failed: " + err.message);
       return null;
-    } finally {
-      setBuilding(false);
-    }
+    } finally { setBuilding(false); }
   }
 
   function triggerDownload(url, name) {
@@ -353,9 +417,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
 
   async function handleDownload() {
     const url = await buildDocx();
-    if (url) {
-      triggerDownload(url, `${originalFile.name.replace(/\.(docx|doc)$/i,"")}-tailored.docx`);
-    }
+    if (url) triggerDownload(url, `${originalFile.name.replace(/\.(docx|doc)$/i,"")}-tailored.docx`);
   }
 
   async function handleGoogleDocs() {
@@ -365,47 +427,42 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
     setTimeout(() => window.open("https://docs.new","_blank"), 700);
   }
 
-  const sectionDivider = (label, count, color) => (
-    <div style={{display:"flex",alignItems:"center",gap:"12px",margin:"4px 0 16px"}}>
-      <div style={{flex:1,height:"1px",background: color==="accent"?"rgba(200,240,100,0.2)":"#252525"}}/>
-      <div style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color: color==="accent"?"#c8f064":"#444",display:"flex",alignItems:"center",gap:"8px",whiteSpace:"nowrap"}}>
-        <span>{label}</span>
-        <span style={{background: color==="accent"?"rgba(200,240,100,0.12)":"#222",color: color==="accent"?"#c8f064":"#555",borderRadius:"10px",padding:"1px 8px",fontSize:"10px"}}>{count}</span>
-      </div>
-      <div style={{flex:1,height:"1px",background: color==="accent"?"rgba(200,240,100,0.2)":"#252525"}}/>
-    </div>
-  );
-
   return (
     <div className="result-panel">
 
-      {/* Header */}
+      {/* Fix #6: cleaner header layout */}
       <div className="result-header">
         <div className="result-meta">
           <span className="badge">{acceptedCount} change{acceptedCount!==1?"s":""} accepted</span>
-          <span className="badge-sub">{tailorStats ? `${tailorStats.wordDrift > 0 ? "+" : ""}${tailorStats.wordDrift} words` : ""}</span>
+          {tailorStats?.wordDrift !== 0 && tailorStats && (
+            <span className="badge-sub" style={{color:Math.abs(tailorStats.wordDrift)>25?"#ff8a8a":"#555"}}>
+              {tailorStats.wordDrift>0?"+":""}{tailorStats.wordDrift} words
+            </span>
+          )}
         </div>
+        {/* Fix #16: clearer button labels */}
         <div className="result-actions">
-          <button className="btn-ghost" onClick={onRetailor}>↺ New JD</button>
-          <button className="btn-ghost" onClick={onReset}>← New resume</button>
+          <button className="btn-ghost" onClick={onRetailor}>New JD</button>
+          <button className="btn-ghost" onClick={onReset}>New resume</button>
         </div>
       </div>
 
-      {/* Analysis */}
-      <AnalysisPanel analysis={analysis} />
+      {/* Fix #14: visually grouped sections with stronger borders */}
+      <AnalysisPanel analysis={analysis}/>
 
-      {/* Downloads */}
-      <div className="download-row">
-        <button className="btn-download" onClick={handleDownload} disabled={building}>
-          {building ? <><span className="spinner spinner-sm"/> Building…</> : "↓ Download .docx"}
-        </button>
-        <button className="btn-gdocs" onClick={handleGoogleDocs} disabled={building}>Open in Google Docs</button>
-        <span className="gdocs-hint">Download → File → Open in Google Docs → export as PDF</span>
+      {/* Fix #5: downloads anchored to top, visually grouped with tabs */}
+      <div style={{borderBottom:"1px solid #1e1e1e"}}>
+        <div className="download-row">
+          <button className="btn-download" onClick={handleDownload} disabled={building}>
+            {building ? <><span className="spinner spinner-sm"/> Building…</> : "↓ Download .docx"}
+          </button>
+          <button className="btn-gdocs" onClick={handleGoogleDocs} disabled={building}>Open in Google Docs</button>
+          <span className="gdocs-hint">Download → open in Google Docs → export as PDF</span>
+        </div>
+        {buildError && <p className="error-msg" style={{margin:"-4px 20px 12px"}}>{buildError}</p>}
       </div>
 
-      {buildError && <p className="error-msg" style={{margin:"0 20px 16px"}}>{buildError}</p>}
-
-      {/* Tabs */}
+      {/* Fix #11: thicker tab underline */}
       <div className="tab-bar">
         <button className={`tab ${view==="diff"?"tab-active":""}`} onClick={() => setView("diff")}>
           Changes <span className="tab-count">{acceptedCount}</span>
@@ -413,97 +470,65 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
         <button className={`tab ${view==="recs"?"tab-active":""}`} onClick={() => setView("recs")}>
           Recommendations
           {recsLoading
-            ? <span className="spinner spinner-sm" style={{marginLeft:6,borderColor:"rgba(200,240,100,0.2)",borderTopColor:"#c8f064"}}/>
-            : recs && <span className="tab-count" style={{background:"rgba(200,240,100,0.1)",color:"#c8f064"}}>ready</span>
+            ? <span className="spinner spinner-sm" style={{marginLeft:6,borderColor:"rgba(200,240,100,0.15)",borderTopColor:"#c8f064"}}/>
+            : recs && <span className="tab-count" style={{background:"rgba(200,240,100,0.08)",color:"#8ab840"}}>ready</span>
           }
         </button>
       </div>
 
-      {/* Diff view */}
       {view === "diff" && (
         <div className="diff-view">
-          {diff.filter(d => d.type === "changed").length > 0 && (
-            <div style={{display:"flex",gap:"8px",marginBottom:"16px",flexWrap:"wrap",alignItems:"center"}}>
-              <span style={{fontSize:"12px",color:"#555",marginRight:"4px"}}>Bulk actions:</span>
-              <button onClick={acceptAll} style={{background:"rgba(60,220,120,0.1)",border:"1px solid rgba(60,220,120,0.25)",color:"#4ddb8a",borderRadius:"5px",padding:"4px 12px",fontSize:"12px",cursor:"pointer",fontWeight:600}}>
-                ✓ Accept all
+
+          {/* Fix #12: clear hierarchy — primary / secondary / danger */}
+          {allChangedIndices.length > 0 && (
+            <div style={{display:"flex",gap:"8px",marginBottom:"18px",flexWrap:"wrap",alignItems:"center"}}>
+              <button onClick={acceptAll} style={{background:"rgba(60,220,120,0.1)",border:"1px solid rgba(60,220,120,0.25)",color:"#4ddb8a",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer",fontWeight:600}}>
+                Accept all
               </button>
-              <button onClick={rejectAllCosmetic} style={{background:"rgba(255,255,255,0.03)",border:"1px solid #2a2a2a",color:"#666",borderRadius:"5px",padding:"4px 12px",fontSize:"12px",cursor:"pointer"}}>
+              <button onClick={rejectAllCosmetic} style={{background:"rgba(255,255,255,0.03)",border:"1px solid #252525",color:"#555",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer"}}>
                 Reject formatting
               </button>
-              <button onClick={rejectAll} style={{background:"rgba(255,80,80,0.06)",border:"1px solid rgba(255,80,80,0.15)",color:"#ff6b6b",borderRadius:"5px",padding:"4px 12px",fontSize:"12px",cursor:"pointer"}}>
+              <button onClick={rejectAll} style={{background:"none",border:"1px solid rgba(255,60,60,0.2)",color:"#884444",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer"}}>
                 Reject all
               </button>
-              <span style={{marginLeft:"auto",fontSize:"12px",color:"#555"}}>{acceptedCount} of {allChangedIndices.length} accepted</span>
+              <span style={{marginLeft:"auto",fontSize:"12px",color:"#3a3a3a"}}>{acceptedCount} / {allChangedIndices.length}</span>
             </div>
           )}
-          {semantic.length === 0 && cosmetic.length === 0 ? (
-            <p className="no-changes">No changes — resume already matches the JD well.</p>
-          ) : (
-            <>
-              {semantic.length > 0 && (
-                <div style={{marginBottom:"8px"}}>
-                  {sectionDivider("Content changes", semantic.length, "accent")}
-                  {semantic.map((entry, i) => {
-                    const idx = entry.lineIdx;
-                    const isAccepted = acceptedKeys.has(idx);
-                    return (
-                      <div key={i} style={{border:`1px solid ${isAccepted?"#3a3a3a":"#222"}`,borderRadius:"8px",overflow:"hidden",marginBottom:"12px",opacity:isAccepted?1:0.5,transition:"opacity 0.2s"}}>
-                        <div style={{background:"rgba(255,60,60,0.07)",borderBottom:"1px solid #2a2a2a"}}>
-                          <div style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",padding:"5px 14px",color:"#ff6b6b",background:"rgba(255,60,60,0.1)"}}>Before</div>
-                          <div style={{padding:"10px 14px",fontSize:"13px",lineHeight:1.65,color:"#bbb",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{renderOps(entry.ops,"del")}</div>
-                        </div>
-                        <div style={{background:"rgba(50,200,100,0.06)"}}>
-                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"5px 14px",background:"rgba(50,200,100,0.1)"}}>
-                            <span style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#4ddb8a"}}>After</span>
-                            <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
-                              <CopyBtn text={entry.tailored}/>
-                              <button
-                                onClick={() => toggleAccept(idx)}
-                                style={{background: isAccepted?"rgba(60,220,120,0.15)":"rgba(255,255,255,0.05)",border:`1px solid ${isAccepted?"rgba(60,220,120,0.4)":"#333"}`,color:isAccepted?"#4ddb8a":"#555",borderRadius:"5px",padding:"3px 10px",fontSize:"11px",cursor:"pointer",fontWeight:600,transition:"all 0.15s"}}
-                              >
-                                {isAccepted ? "✓ Accepted" : "Rejected"}
-                              </button>
-                            </div>
-                          </div>
-                          <div style={{padding:"10px 14px",fontSize:"13px",lineHeight:1.65,color:"#ddd",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{renderOps(entry.ops,"add")}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
 
-              {cosmetic.length > 0 && (
-                <div>
-                  {sectionDivider("Formatting & punctuation", cosmetic.length, "muted")}
-                  {cosmetic.map((entry, i) => {
-                    const idx = entry.lineIdx;
-                    const isAccepted = acceptedKeys.has(idx);
-                    return (
-                      <div key={i} style={{border:`1px solid ${isAccepted?"#2e2e2e":"#1e1e1e"}`,borderRadius:"8px",overflow:"hidden",marginBottom:"10px",opacity:isAccepted?0.8:0.35,transition:"opacity 0.2s"}}>
-                        <div style={{background:"rgba(255,60,60,0.04)",borderBottom:"1px solid #252525"}}>
-                          <div style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",padding:"4px 14px",color:"#663333",background:"rgba(255,60,60,0.06)"}}>Before</div>
-                          <div style={{padding:"8px 14px",fontSize:"12px",lineHeight:1.6,color:"#666",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{renderOps(entry.ops,"del")}</div>
-                        </div>
-                        <div style={{background:"rgba(50,200,100,0.03)"}}>
-                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 14px",background:"rgba(50,200,100,0.05)"}}>
-                            <span style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#2a6644"}}>After</span>
-                            <button
-                              onClick={() => toggleAccept(idx)}
-                              style={{background:"none",border:`1px solid ${isAccepted?"#2a4a36":"#2a2a2a"}`,color:isAccepted?"#2a6644":"#333",borderRadius:"5px",padding:"2px 8px",fontSize:"10px",cursor:"pointer",fontWeight:600}}
-                            >
-                              {isAccepted ? "✓" : "Rejected"}
-                            </button>
-                          </div>
-                          <div style={{padding:"8px 14px",fontSize:"12px",lineHeight:1.6,color:"#555",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{renderOps(entry.ops,"add")}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
+          {/* Fix #13: empty state when all rejected */}
+          {allChangedIndices.length > 0 && acceptedCount === 0 && (
+            <div style={{textAlign:"center",padding:"32px 20px",color:"#3a3a3a",fontSize:"13px",border:"1px dashed #222",borderRadius:"8px",marginBottom:"16px"}}>
+              All changes rejected — download will be identical to your original.
+              <br/>
+              <button onClick={acceptAll} style={{marginTop:"12px",background:"none",border:"1px solid #333",color:"#666",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer"}}>
+                Accept all
+              </button>
+            </div>
+          )}
+
+          {/* Fix #13: empty state when no changes at all */}
+          {semantic.length === 0 && cosmetic.length === 0 && (
+            <div style={{textAlign:"center",padding:"32px 20px",color:"#3a3a3a",fontSize:"13px"}}>
+              No changes detected — your resume already covers the JD well.
+            </div>
+          )}
+
+          {semantic.length > 0 && (
+            <div style={{marginBottom:"4px"}}>
+              <SectionDivider label="Content changes" count={semantic.length} accent/>
+              {semantic.map((entry,i) => (
+                <DiffBlock key={i} entry={entry} isAccepted={acceptedKeys.has(entry.lineIdx)} onToggle={toggleAccept}/>
+              ))}
+            </div>
+          )}
+
+          {cosmetic.length > 0 && (
+            <div>
+              <SectionDivider label="Formatting & punctuation" count={cosmetic.length} accent={false}/>
+              {cosmetic.map((entry,i) => (
+                <DiffBlock key={i} entry={entry} isAccepted={acceptedKeys.has(entry.lineIdx)} onToggle={toggleAccept} compact/>
+              ))}
+            </div>
           )}
         </div>
       )}

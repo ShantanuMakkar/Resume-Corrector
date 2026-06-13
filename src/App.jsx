@@ -224,7 +224,7 @@ export default function App() {
         <div className="logo-mark" onClick={handleFullReset} style={{cursor:"pointer"}} title="Back to home">RT</div>
         <div style={{cursor:"pointer"}} onClick={handleFullReset}>
           <h1>Resume Tailor</h1>
-          <p>80% yours. 20% theirs. 100% honest.</p>
+          <p style={{color:"#777",fontWeight:500,letterSpacing:"-0.01em"}}>80% yours. 20% theirs. 100% honest.</p>
         </div>
       </header>
 
@@ -266,7 +266,7 @@ export default function App() {
             >
               {status === "processing" ? (
                 <span className="btn-inner">
-                  {Math.round(progress)}% — Tailoring…
+                  Tailoring… {Math.round(progress)}%
                 </span>
               ) : (
                 "Tailor Resume"
