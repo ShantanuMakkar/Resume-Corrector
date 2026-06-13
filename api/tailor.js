@@ -104,7 +104,7 @@ function buildLineMetadata(lines) {
     const isSummary = !isBullet && !isSkills && !isTechStack && words >= 3 && words <= 15;
     // Skills: allow net-zero swaps (same word count) — model can replace low-priority with JD keywords
     // Use original word count as budget (no increase) but explicitly allow swaps in prompt
-    const budget = isEmpty ? 0 : isSkills ? words : (isBullet || isTechStack) ? words + 3 : words + 1;
+    const budget = isEmpty ? 0 : isSkills ? words + 2 : (isBullet || isTechStack) ? words + 3 : words + 1;
     return { words, budget, isEmpty, isBullet, isSkills, isTechStack, isSummary };
   });
 }

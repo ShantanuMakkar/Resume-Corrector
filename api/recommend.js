@@ -7,7 +7,7 @@ export const config = {
   api: { bodyParser: { sizeLimit: "10mb" } },
 };
 
-// Auto-fallback: try gemini-2.5-flash first, fall back to gemini-1.5-flash on quota errors
+// Auto-fallback: try gemini-2.5-flash first, fall back to gemini-2.5-flash-lite on quota errors
 function isQuotaError(err) {
   const msg = (err?.message || err?.toString() || "").toLowerCase();
   return msg.includes("429") || msg.includes("quota") || msg.includes("resource_exhausted") || msg.includes("rate limit");
