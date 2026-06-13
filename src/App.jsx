@@ -4,6 +4,75 @@ import JDInput from "./components/JDInput";
 import ResultPanel from "./components/ResultPanel";
 import "./App.css";
 
+function WhatYouGet() {
+  const items = [
+    { label: "Tailored .docx", sub: "Same layout, new keywords", sym: "↓", accent: "#c8f064" },
+    { label: "JD match score", sub: "Know your fit before applying", sym: "%", accent: "#7eb8ff" },
+    { label: "Missing keywords", sub: "What ATS is filtering out", sym: "◎", accent: "#ff8a8a" },
+    { label: "Bullet injection", sub: "Keywords in the right place", sym: "+", accent: "#4ddb8a" },
+    { label: "Accept / reject", sub: "Every change, your call", sym: "✓", accent: "#f0c040" },
+    { label: "Cover letter hooks", sub: "What to lead with", sym: "→", accent: "#c8f064" },
+    { label: "Reframing tips", sub: "Stronger versions of your bullets", sym: "↺", accent: "#7eb8ff" },
+    { label: "Gap analysis", sub: "Honest about what's missing", sym: "!", accent: "#ff8a8a" },
+  ];
+  return (
+    <div style={{ marginTop: "32px" }}>
+      <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#333", marginBottom: "16px" }}>
+        What you get
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(175px, 1fr))", gap: "1px", background: "#1a1a1a", border: "1px solid #1a1a1a", borderRadius: "10px", overflow: "hidden" }}>
+        {items.map((item, i) => (
+          <div key={i} style={{
+            background: "#111",
+            padding: "16px 16px 14px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+          }}>
+            <div style={{
+              width: "32px", height: "32px",
+              borderRadius: "8px",
+              background: `${item.accent}14`,
+              border: `1px solid ${item.accent}22`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: "15px", color: item.accent, fontWeight: 700, lineHeight: 1,
+            }}>{item.sym}</div>
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: 600, color: "#ddd", marginBottom: "3px", lineHeight: 1.3 }}>{item.label}</div>
+              <div style={{ fontSize: "11px", color: "#444", lineHeight: 1.4 }}>{item.sub}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "center", marginTop: "28px" }}>
+        <button
+          onClick={() => document.getElementById("upload-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          style={{
+            background: "#c8f064",
+            color: "#0f0f0f",
+            border: "none",
+            borderRadius: "100px",
+            padding: "11px 28px",
+            fontSize: "13px",
+            fontWeight: 700,
+            cursor: "pointer",
+            letterSpacing: "-0.01em",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            transition: "opacity 0.15s, transform 0.15s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+          onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(0)"; }}
+        >
+          Upload your resume
+          <span style={{ fontSize: "16px", lineHeight: 1 }}>↓</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function HowItWorks() {
   const steps = [
     {
@@ -81,49 +150,7 @@ function HowItWorks() {
       </div>
 
       {/* What you get */}
-      <div style={{ marginTop: "28px" }}>
-        <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#444", marginBottom: "14px" }}>
-          What you get
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "8px" }}>
-          {[
-            { label: "Tailored .docx", icon: "↓", color: "#c8f064", dim: "rgba(200,240,100,0.08)" },
-            { label: "JD match score", icon: "%", color: "#7eb8ff", dim: "rgba(126,184,255,0.08)" },
-            { label: "Missing keywords", icon: "!", color: "#ff8a8a", dim: "rgba(255,138,138,0.08)" },
-            { label: "Keyword injection", icon: "+", color: "#4ddb8a", dim: "rgba(77,219,138,0.08)" },
-            { label: "Accept / reject", icon: "✓", color: "#f0c040", dim: "rgba(240,192,64,0.08)" },
-            { label: "Cover letter hooks", icon: "→", color: "#c8f064", dim: "rgba(200,240,100,0.08)" },
-            { label: "Reframing tips", icon: "↺", color: "#7eb8ff", dim: "rgba(126,184,255,0.08)" },
-            { label: "Gap analysis", icon: "◉", color: "#ff8a8a", dim: "rgba(255,138,138,0.08)" },
-          ].map((item, i) => (
-            <div key={i} style={{
-              background: item.dim,
-              border: `1px solid ${item.color}20`,
-              borderRadius: "8px",
-              padding: "10px 12px",
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-            }}>
-              <span style={{
-                width: "24px",
-                height: "24px",
-                borderRadius: "6px",
-                background: `${item.color}18`,
-                border: `1px solid ${item.color}35`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "11px",
-                color: item.color,
-                fontWeight: 700,
-                flexShrink: 0,
-              }}>{item.icon}</span>
-              <span style={{ fontSize: "12px", color: "#bbb", lineHeight: 1.3 }}>{item.label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <WhatYouGet />
     </div>
   );
 }
@@ -179,11 +206,16 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resumeText, jd }),
       });
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || "Server error");
+      const rawText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        throw new Error(rawText.slice(0, 200) || "Server returned invalid response");
       }
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Server error");
+      }
       setTailoredText(data.tailoredText);
       setTailorStats(data.stats || null);
       setAnalysis(data.analysis || null);
@@ -242,6 +274,7 @@ export default function App() {
       ) : (
         <main className="main-grid">
           {!resumeFile && <HowItWorks />}
+          <div id="upload-section" />
           <ResumeUpload
             file={resumeFile}
             onFile={(file, text) => {
