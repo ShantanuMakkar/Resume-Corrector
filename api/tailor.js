@@ -324,13 +324,18 @@ ${jd}`;
       console.warn("Analysis parse failed:", e.message);
     }
 
-    // Fix #8: consistent scoring
+    // Deterministic scoring — we extract JD keywords ourselves for consistent scores
+    const allJdTerms = [...new Set(
+      (jd.match(/\b[A-Z][a-zA-Z0-9]+\b/g) || [])
+        .filter(t => t.length > 2 && !NON_TECH_JD_WORDS.has(t))
+    )];
+    const beforeScore = keywordScore(resumeText, allJdTerms, []);
+
+    // Gemini lists used for display only (keyword tags in UI)
     const matchedKws = analysis?.matchedKeywords || [];
-    // Deduplicate: remove from missing anything already in matched
     const missingKws = (analysis?.missingKeywords || []).filter(k =>
       !matchedKws.some(m => m.toLowerCase() === k.toLowerCase())
     );
-    const beforeScore = keywordScore(resumeText, matchedKws, missingKws);
 
     // Enforce per-line budgets — also enforce minimum (no truncation)
     const correctedContent = contentLines.map(({ line: origLine, meta }, i) => {
