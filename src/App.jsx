@@ -44,32 +44,6 @@ function WhatYouGet() {
           </div>
         ))}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginTop: "32px" }}>
-        <span style={{ fontSize: "11px", color: "#333", letterSpacing: "0.05em" }}>ready to start?</span>
-        <button
-          onClick={() => document.getElementById("upload-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-          style={{
-            background: "#c8f064",
-            color: "#0f0f0f",
-            border: "none",
-            borderRadius: "100px",
-            padding: "11px 28px",
-            fontSize: "13px",
-            fontWeight: 700,
-            cursor: "pointer",
-            letterSpacing: "-0.01em",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            transition: "opacity 0.15s, transform 0.15s",
-          }}
-          onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-          onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(0)"; }}
-        >
-          Upload your resume
-          <span style={{ fontSize: "16px", lineHeight: 1 }}>↓</span>
-        </button>
-      </div>
     </div>
   );
 }
@@ -264,6 +238,41 @@ export default function App() {
       ) : (
         <main className="main-grid">
           {!resumeFile && <HowItWorks />}
+          {!resumeFile && (
+            <div style={{
+              position: "fixed",
+              bottom: "28px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 100,
+            }}>
+              <button
+                onClick={() => document.getElementById("upload-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                style={{
+                  background: "#c8f064",
+                  color: "#0f0f0f",
+                  border: "none",
+                  borderRadius: "100px",
+                  padding: "12px 28px",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  letterSpacing: "-0.01em",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+                  transition: "opacity 0.15s, transform 0.15s",
+                  whiteSpace: "nowrap",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = "0.9"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(0)"; }}
+              >
+                Upload your resume
+                <span style={{ fontSize: "15px", lineHeight: 1 }}>↓</span>
+              </button>
+            </div>
+          )}
           <div id="upload-section" />
           <ResumeUpload
             file={resumeFile}
