@@ -17,7 +17,7 @@ function WhatYouGet() {
   ];
   return (
     <div style={{ marginTop: "32px" }}>
-      <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#333", marginBottom: "16px" }}>
+      <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#555", marginBottom: "16px" }}>
         What you get
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(175px, 1fr))", gap: "1px", background: "#1a1a1a", border: "1px solid #1a1a1a", borderRadius: "10px", overflow: "hidden" }}>
@@ -26,7 +26,7 @@ function WhatYouGet() {
             <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: `${item.accent}14`, border: `1px solid ${item.accent}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "15px", color: item.accent, fontWeight: 700, lineHeight: 1 }}>{item.sym}</div>
             <div>
               <div style={{ fontSize: "13px", fontWeight: 600, color: "#ddd", marginBottom: "3px", lineHeight: 1.3 }}>{item.label}</div>
-              <div style={{ fontSize: "11px", color: "#444", lineHeight: 1.4 }}>{item.sub}</div>
+              <div style={{ fontSize: "11px", color: "#666", lineHeight: 1.4 }}>{item.sub}</div>
             </div>
           </div>
         ))}
@@ -62,7 +62,7 @@ function HowItWorks() {
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: "14px", fontWeight: 600, color: "#ddd", marginBottom: "5px" }}>{step.heading}</div>
               <div style={{ fontSize: "13px", color: "#666", lineHeight: 1.6 }}>{step.body}</div>
-              <div style={{ fontSize: "12px", color: "#333", marginTop: "5px" }}>{step.detail}</div>
+              <div style={{ fontSize: "12px", color: "#555", marginTop: "5px" }}>{step.detail}</div>
             </div>
           </div>
         ))}
@@ -224,7 +224,7 @@ export default function App() {
 
           {/* Fix #1: privacy note */}
           {!resumeFile && (
-            <p style={{ fontSize: "11px", color: "#333", textAlign: "center", marginBottom: "4px" }}>
+            <p style={{ fontSize: "11px", color: "#666", textAlign: "center", marginBottom: "4px" }}>
               🔒 Your file stays in your browser — only text is sent to the AI
             </p>
           )}
@@ -250,7 +250,7 @@ export default function App() {
 
           {/* Fix #3: format note */}
           {resumeFile && (
-            <p style={{ fontSize: "11px", color: "#333", marginTop: "-8px" }}>
+            <p style={{ fontSize: "11px", color: "#555", marginTop: "-8px" }}>
               .docx preserves full formatting · .doc may have limited layout fidelity
             </p>
           )}

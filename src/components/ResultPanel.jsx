@@ -165,7 +165,7 @@ function MatchScore({ score }) {
         <div style={{fontSize:"12px",color:"#555",marginTop:"2px"}}>
           {score >= 75 ? "Strong fit" : score >= 50 ? "Moderate fit" : "Weak fit"}
         </div>
-        <div style={{fontSize:"11px",color:"#333",marginTop:"3px"}}>after tailoring</div>
+        <div style={{fontSize:"11px",color:"#555",marginTop:"3px"}}>after tailoring</div>
       </div>
     </div>
   );
@@ -184,14 +184,14 @@ function AnalysisPanel({ analysis }) {
               <span key={i} style={{background:"rgba(255,60,60,0.09)",color:"#ff8a8a",border:"1px solid rgba(255,60,60,0.18)",borderRadius:"4px",padding:"3px 8px",fontSize:"12px"}}>{kw}</span>
             ))}
           </div>
-          {analysis.missingContext && <p style={{fontSize:"12px",color:"#444",marginTop:"7px",lineHeight:1.5}}>{analysis.missingContext}</p>}
+          {analysis.missingContext && <p style={{fontSize:"12px",color:"#666",marginTop:"7px",lineHeight:1.5}}>{analysis.missingContext}</p>}
         </div>
       )}
       <div style={{display:"flex",gap:"20px",flexWrap:"wrap",alignItems:"flex-start",paddingBottom:"14px",borderBottom:"1px solid #1a1a1a"}}>
         {analysis.matchScore != null && <MatchScore score={analysis.matchScore}/>}
         <div style={{flex:1,minWidth:"180px"}}>
           {analysis.titleAlignment && <p style={{fontSize:"13px",color:"#aaa",marginBottom:"6px",lineHeight:1.5}}>{analysis.titleAlignment}</p>}
-          {analysis.recommendation && <p style={{fontSize:"12px",color:"#555",lineHeight:1.5,fontStyle:"italic"}}>{analysis.recommendation}</p>}
+          {analysis.recommendation && <p style={{fontSize:"12px",color:"#666",lineHeight:1.5,fontStyle:"italic"}}>{analysis.recommendation}</p>}
         </div>
       </div>
       {analysis.matchedKeywords?.length > 0 && (
@@ -273,8 +273,8 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
                   <div style={{flex:1,fontSize:"13px",color:"#ddd",lineHeight:1.55}}>• {item.bullet}</div>
                   <CopyBtn text={item.bullet}/>
                 </div>
-                <div style={{fontSize:"11px",color:"#4ddb8a",fontWeight:600,marginBottom:"3px"}}>{item.section}</div>
-                <div style={{fontSize:"12px",color:"#444",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
+                <div style={{fontSize:"11px",color:"#5acd8a",fontWeight:600,marginBottom:"3px"}}>{item.section}</div>
+                <div style={{fontSize:"12px",color:"#666",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
               </div>
             ))}
           </div>
@@ -292,7 +292,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
                   <div style={{flex:1,fontSize:"13px",color:"#a8c8ff",lineHeight:1.55}}>→ {item.reframe}</div>
                   <CopyBtn text={item.reframe}/>
                 </div>
-                <div style={{fontSize:"12px",color:"#3a3a3a",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
+                <div style={{fontSize:"12px",color:"#666",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
               </div>
             ))}
           </div>
@@ -309,7 +309,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
                   <span style={{fontSize:"13px",color:"#f0c040",fontWeight:600}}>{item.skill}</span>
                   <CopyBtn text={item.skill}/>
                 </div>
-                <div style={{fontSize:"12px",color:"#444",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
+                <div style={{fontSize:"12px",color:"#666",lineHeight:1.4,fontStyle:"italic"}}>{item.reasoning}</div>
               </div>
             ))}
           </div>
@@ -326,7 +326,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
                   <span style={{fontSize:"13px",color:"#ff8a8a",fontWeight:600}}>{item.gap}</span>
                   <span style={{fontSize:"10px",fontWeight:700,color:sev[item.severity]||"#555",background:"rgba(0,0,0,0.25)",borderRadius:"3px",padding:"1px 6px",letterSpacing:"0.05em"}}>{item.severity}</span>
                 </div>
-                <div style={{fontSize:"12px",color:"#444",lineHeight:1.4,fontStyle:"italic"}}>{item.suggestion}</div>
+                <div style={{fontSize:"12px",color:"#666",lineHeight:1.4,fontStyle:"italic"}}>{item.suggestion}</div>
               </div>
             ))}
           </div>
@@ -448,7 +448,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
         <div className="result-meta">
           <span className="badge">{acceptedCount} change{acceptedCount!==1?"s":""} accepted</span>
           {tailorStats?.wordDrift !== 0 && tailorStats && (
-            <span className="badge-sub" style={{color:Math.abs(tailorStats.wordDrift)>25?"#ff8a8a":"#444"}}>
+            <span className="badge-sub" style={{color:Math.abs(tailorStats.wordDrift)>25?"#ff8a8a":"#666"}}>
               {tailorStats.wordDrift>0?"+":""}{tailorStats.wordDrift} words
             </span>
           )}
@@ -500,22 +500,22 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
               <button onClick={acceptAll} style={{background:"rgba(60,220,120,0.1)",border:"1px solid rgba(60,220,120,0.2)",color:"#4ddb8a",borderRadius:"6px",padding:"5px 12px",fontSize:"12px",cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>
                 Accept all
               </button>
-              <button onClick={rejectAllCosmetic} style={{background:"none",border:"1px solid #222",color:"#444",borderRadius:"6px",padding:"5px 12px",fontSize:"12px",cursor:"pointer",whiteSpace:"nowrap"}}>
+              <button onClick={rejectAllCosmetic} style={{background:"none",border:"1px solid #2a2a2a",color:"#666",borderRadius:"6px",padding:"5px 12px",fontSize:"12px",cursor:"pointer",whiteSpace:"nowrap"}}>
                 Reject formatting
               </button>
-              <button onClick={rejectAll} style={{background:"none",border:"1px solid #1e1e1e",color:"#3a3a3a",borderRadius:"6px",padding:"5px 12px",fontSize:"12px",cursor:"pointer",whiteSpace:"nowrap"}}>
+              <button onClick={rejectAll} style={{background:"none",border:"1px solid #252525",color:"#666",borderRadius:"6px",padding:"5px 12px",fontSize:"12px",cursor:"pointer",whiteSpace:"nowrap"}}>
                 Reject all
               </button>
-              <span style={{marginLeft:"auto",fontSize:"11px",color:"#2a2a2a",fontVariantNumeric:"tabular-nums"}}>{acceptedCount}/{allChangedIndices.length}</span>
+              <span style={{marginLeft:"auto",fontSize:"11px",color:"#555",fontVariantNumeric:"tabular-nums"}}>{acceptedCount}/{allChangedIndices.length}</span>
             </div>
           )}
 
           {/* Fix #13: empty state when all rejected */}
           {allChangedIndices.length > 0 && acceptedCount === 0 && (
-            <div style={{textAlign:"center",padding:"32px 20px",color:"#3a3a3a",fontSize:"13px",border:"1px dashed #222",borderRadius:"8px",marginBottom:"16px"}}>
+            <div style={{textAlign:"center",padding:"32px 20px",color:"#555",fontSize:"13px",border:"1px dashed #222",borderRadius:"8px",marginBottom:"16px"}}>
               All changes rejected — download will be identical to your original.
               <br/>
-              <button onClick={acceptAll} style={{marginTop:"12px",background:"none",border:"1px solid #333",color:"#666",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer"}}>
+              <button onClick={acceptAll} style={{marginTop:"12px",background:"none",border:"1px solid #444",color:"#888",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer"}}>
                 Accept all
               </button>
             </div>
@@ -523,7 +523,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
 
           {/* Fix #13: empty state when no changes at all */}
           {semantic.length === 0 && cosmetic.length === 0 && (
-            <div style={{textAlign:"center",padding:"32px 20px",color:"#3a3a3a",fontSize:"13px"}}>
+            <div style={{textAlign:"center",padding:"32px 20px",color:"#555",fontSize:"13px"}}>
               No changes detected — your resume already covers the JD well.
             </div>
           )}

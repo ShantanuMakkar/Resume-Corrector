@@ -7,7 +7,7 @@
   --border: #2a2a2a;
   --border-hover: #3a3a3a;
   --text: #e8e8e8;
-  --text-muted: #666;
+  --text-muted: #777;
   --text-dim: #999;
   --accent: #c8f064;
   --accent-dim: rgba(200, 240, 100, 0.12);
@@ -609,7 +609,7 @@ body {
 
 .gdocs-hint {
   font-size: 11px;
-  color: var(--text-muted);
+  color: #666;
 }
 
 /* Text view */
