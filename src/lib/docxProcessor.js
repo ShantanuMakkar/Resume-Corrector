@@ -217,6 +217,12 @@ export async function injectTextIntoDocx(originalFile, originalText, tailoredTex
     }
   }
 
+  // Fix #7: sanitise replacement values
+  for (const [k, v] of replacements.entries()) {
+    const clean = v.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").replace(/[\uFFFE\uFFFF]/g, "");
+    if (clean !== v) replacements.set(k, clean);
+  }
+
   // Fuzzy fallback for slight extraction differences
   for (const xmlPara of xmlParas) {
     const xt = xmlPara.text;

@@ -7,6 +7,27 @@ export const config = {
   api: { bodyParser: { sizeLimit: "10mb" } },
 };
 
+// Auto-fallback: try gemini-2.5-flash first, fall back to gemini-1.5-flash on quota errors
+function isQuotaError(err) {
+  const msg = (err?.message || err?.toString() || "").toLowerCase();
+  return msg.includes("429") || msg.includes("quota") || msg.includes("resource_exhausted") || msg.includes("rate limit");
+}
+
+async function generateWithFallback(primaryConfig, fallbackModelName, ...args) {
+  try {
+    const model = client.getGenerativeModel(primaryConfig);
+    return await model.generateContent(...args);
+  } catch (err) {
+    if (isQuotaError(err)) {
+      console.log(`[fallback] ${primaryConfig.model} quota hit, switching to ${fallbackModelName}`);
+      // 1.5-flash doesn't support thinkingConfig — use clean config
+      const fallbackModel = client.getGenerativeModel({ model: fallbackModelName });
+      return await fallbackModel.generateContent(...args);
+    }
+    throw err;
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
@@ -69,8 +90,11 @@ ${resumeText}
 Job Description:
 ${jd}`;
 
-    const model = client.getGenerativeModel({ model: "gemini-2.5-flash" });
-    const response = await model.generateContent(prompt);
+    const primaryConfig = {
+      model: "gemini-2.5-flash",
+      generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
+    };
+    const response = await generateWithFallback(primaryConfig, "gemini-1.5-flash", prompt);
     let raw = response.response.text().trim()
       .replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
 
