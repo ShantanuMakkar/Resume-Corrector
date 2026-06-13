@@ -250,7 +250,8 @@ SKILLS LINE (swap max 2 skills):
 - Add: MWAA, ElastiCache, Opensearch, MSK, DynamoDB — only if genuinely in JD
 
 TECHNOLOGIES USED lines (+3 words):
-- Append missing JD tools used in that project: "| CodeCommit | CodeBuild" etc.
+- Append missing JD tools used in that project: "| CodeCommit | CodeBuild | CodeDeploy | CodePipeline" etc.
+- Priority: inject CodeCommit, CodeBuild, CodeDeploy, CodePipeline into the CI/CD tech stack line
 
 HARD COUNTS:
 - Output EXACTLY ${contentLineCount} lines
@@ -360,7 +361,8 @@ ${jd}`;
 
     const tailoredText = finalLines.join("\n");
     const tailoredWordCount = tailoredText.split(/\s+/).filter(Boolean).length;
-    const afterScore = keywordScore(tailoredText, matchedKws, missingKws);
+    // Deterministic after score: same JD terms, now against tailored text
+    const afterScore = keywordScore(tailoredText, allJdTerms, []);
 
     if (analysis) {
       analysis.beforeScore = beforeScore;
