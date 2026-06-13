@@ -212,7 +212,28 @@ export default async function handler(req, res) {
     const summaryAlreadyGood = similarityScore(summaryText, jd.slice(0, 500)) > 0.25;
 
     // Pre-compute missing keywords from JD vs resume for use in prompt
-    const NON_TECH_JD_WORDS = new Set(["Automations","Responsibilities","Deployments","Provide","Architect","Services","Engineers","Infrastructure","Requirements","Qualifications","Please","Have","Must","Will","This","With","From","Your","Their","More","Other","Both","Also","Such","Each","These","Those"]);
+    // Unified filter for non-technical words from JD
+    const NON_TECH_JD_WORDS = new Set([
+      "Automations","Responsibilities","Deployments","Provide","Architect","Services",
+      "Engineers","Infrastructure","Requirements","Qualifications","Please","Have","Must",
+      "Will","This","With","From","Your","Their","More","Other","Both","Also","Such",
+      "Each","These","Those","Main","Work","Tech","Stack","Cloud","Security","More","Than",
+      "Years","Good","Should","About","Above","Some","Only","Just","Very","Most","Well",
+      "Even","Many","Much","Still","High","Best","Fast","Easy","Full","Free","Open","Next",
+      "Last","Team","Role","Time","Type","Data","Code","Test","User","File","Tool","Area",
+      "Page","List","Item","Base","Core","Mode","Path","Port","Task","Step","Flow","Call",
+      "Real","Live","Side","Back","Part","Used","Need","Help","Make","Give","Keep","Take",
+      "Know","Show","Find","Turn","Move","Come","Want","Like","Look","Into","Over","Then",
+      "When","Here","There","Where","Been","They","Were","What","Which","While","After",
+      "Before","Since","Until","During","Within","Between","Against","Through","Around",
+      "Below","Under","Along","Across","Behind","Beyond","Inside","Outside","Secret",
+      "Manager","Based","Regional","Failure","Tolerance","Industry","Standards","Compliance",
+      "Payment","Large","Scale","Distributed","Preferred","Bachelor","Degree","Related",
+      "Field","Optional","Required","Nice","Bilingual","English","Japanese","Published",
+      "Relevant","Verifiable","Proficiency","Either","Language","Excellent","Written",
+      "Verbal","Interpersonal","Demonstrated","Ability","Understanding","Building","Design",
+      "Manage","Ensure","Enable","Support","Delivery","Extensive","Technical","Requirement"
+    ]);
 
     const jdTerms = [...new Set(
       (jd.match(/\b[A-Z][a-zA-Z0-9]*(?:\/[A-Z][a-zA-Z0-9]*)?\b/g) || [])
@@ -237,8 +258,8 @@ NEVER TOUCH — return these EXACTLY as given:
 INJECT INTO — bullets and tech stack lines ONLY:
 
 BULLETS (+3 word budget each):
-- Add keywords INLINE using slashes or commas: "SQS/MSK" or "ELK, Splunk, and Opensearch"
-- NEVER use parentheses: not "(MSK)", not "(Opensearch)"
+- Add keywords INLINE using slashes or commas: "Lambda/Tool1/Tool2" or "ELK, Splunk, and NewTool"
+- NEVER use parentheses: not "(Tool)" — always inline
 - NEVER remove: tools, metrics (%), numbers, outcomes, company-specific context
 - Remove ONLY exact filler: the word "ingestion" after SQS, the word "scripting" after Bash/Python
 - If no filler exists: append at end of tech list — "...using Terraform, CloudFormation, and CodePipeline"
@@ -247,11 +268,13 @@ BULLETS (+3 word budget each):
 SKILLS LINE (swap max 2 skills):
 - ONLY replace skills with score (1) if they don't appear in any bullet
 - Never remove tools that appear elsewhere: ELK, Splunk, Vault, OPA, Karpenter, PagerDuty, etc.
-- Add: MWAA, ElastiCache, Opensearch, MSK, DynamoDB — only if genuinely in JD
+- Add: whichever missing JD keywords fit naturally in the skills line
 
 TECHNOLOGIES USED lines (+3 words):
-- Append missing JD tools used in that project: "| CodeCommit | CodeBuild | CodeDeploy | CodePipeline" etc.
-- Priority: inject CodeCommit, CodeBuild, CodeDeploy, CodePipeline into the CI/CD tech stack line
+- Look at the missing keywords list above and append any that genuinely apply to that project
+- Match the missing keyword to the project: if a CI/CD tool is missing, add it to CI/CD tech stacks
+- If a database/storage tool is missing, add it to the project that involved databases
+- Format: append as "| ToolName" to match existing style
 
 HARD COUNTS:
 - Output EXACTLY ${contentLineCount} lines
@@ -361,8 +384,9 @@ ${jd}`;
           // Keep: camelCase tech names (OpenTelemetry, ArgoCD, CloudFormation, DynamoDB)
           if (/[A-Z].*[A-Z]/.test(t) && t.length > 4) return true;
           // Keep: specific known tools (single-word capitalised tech names >= 4 chars)
-          const knownTools = new Set(["Terraform","Prometheus","Grafana","Dynatrace","Atlantis","Kafka","Redis","Ansible","Helm","Vault","Splunk","Jenkins","Docker","Linux","Python","Rust","Golang","Bash","Kubernetes","Lambda","Cloudfront","ElastiCache","DynamoDB","Opensearch","CloudWatch","Cognito","CloudFormation","ShellScripting","CodeCommit","CodeBuild","CodeDeploy","CodePipeline","ArgoCD","MWAA","OpenTelemetry"]);
-          return knownTools.has(t);
+          // Single-word capitalised tech names >= 5 chars not caught by other patterns
+          // Heuristic: if it appears in the JD as a standalone term, it's likely a tool
+          return t.length >= 5 && /^[A-Z][a-z]+([A-Z][a-z]*)*$/.test(t);
         })
     )];
     const beforeScore = keywordScore(resumeText, allJdTerms, []);
