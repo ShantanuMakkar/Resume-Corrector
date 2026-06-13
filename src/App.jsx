@@ -44,7 +44,8 @@ function WhatYouGet() {
           </div>
         ))}
       </div>
-      <div style={{ display: "flex", justifyContent: "center", marginTop: "28px" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginTop: "32px" }}>
+        <span style={{ fontSize: "11px", color: "#333", letterSpacing: "0.05em" }}>ready to start?</span>
         <button
           onClick={() => document.getElementById("upload-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
           style={{
@@ -76,25 +77,22 @@ function WhatYouGet() {
 function HowItWorks() {
   const steps = [
     {
-      tag: "Upload",
+      num: "01",
       heading: "Your resume, unchanged",
-      body: "Drop your .docx file. We read the structure, not just the text — fonts, layout, and formatting are preserved exactly.",
+      body: "Drop your .docx — fonts, layout, and formatting are preserved exactly.",
       detail: "Nothing gets reformatted or rebuilt.",
-      accent: "#c8f064",
     },
     {
-      tag: "Paste",
+      num: "02",
       heading: "The job description",
-      body: "Copy the full JD — requirements, responsibilities, skills. The more you paste, the sharper the match.",
+      body: "Paste the full JD. The more context, the sharper the keyword match.",
       detail: "Works with any portal: LinkedIn, Naukri, Workday, company sites.",
-      accent: "#7eb8ff",
     },
     {
-      tag: "Get back",
+      num: "03",
       heading: "A surgically tailored resume",
-      body: "We inject the JD's missing keywords into your skills and bullets. You see exactly what changed, accept or reject each one.",
-      detail: "Plus: JD match score, missing keywords, and what to say in your cover letter.",
-      accent: "#4ddb8a",
+      body: "Missing JD keywords are injected into your skills and bullets. Accept or reject each change.",
+      detail: "Plus: match score, missing keywords, cover letter hooks.",
     },
   ];
 
@@ -117,39 +115,31 @@ function HowItWorks() {
         {steps.map((step, i) => (
           <div key={i} style={{
             display: "flex",
-            gap: "16px",
+            gap: "20px",
             padding: "16px 0",
-            borderBottom: i < steps.length - 1 ? "1px solid #1e1e1e" : "none",
+            borderBottom: i < steps.length - 1 ? "1px solid #1a1a1a" : "none",
             alignItems: "flex-start",
           }}>
-            <div style={{
-              flexShrink: 0,
-              width: "64px",
-              paddingTop: "2px",
-            }}>
+            <div style={{ flexShrink: 0, paddingTop: "1px" }}>
               <span style={{
-                fontSize: "10px",
+                fontSize: "11px",
                 fontWeight: 700,
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-                color: step.accent,
-                background: `${step.accent}18`,
-                border: `1px solid ${step.accent}30`,
-                borderRadius: "4px",
-                padding: "2px 7px",
-                whiteSpace: "nowrap",
-              }}>{step.tag}</span>
+                letterSpacing: "0.05em",
+                color: "#c8f064",
+                fontVariantNumeric: "tabular-nums",
+              }}>{step.num}</span>
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#ddd", marginBottom: "4px" }}>{step.heading}</div>
-              <div style={{ fontSize: "13px", color: "#777", lineHeight: 1.55 }}>{step.body}</div>
-              <div style={{ fontSize: "12px", color: "#555", marginTop: "4px", fontStyle: "italic" }}>{step.detail}</div>
+              <div style={{ fontSize: "14px", fontWeight: 600, color: "#ddd", marginBottom: "5px" }}>{step.heading}</div>
+              <div style={{ fontSize: "13px", color: "#666", lineHeight: 1.6 }}>{step.body}</div>
+              <div style={{ fontSize: "12px", color: "#333", marginTop: "5px" }}>{step.detail}</div>
             </div>
           </div>
         ))}
       </div>
 
       {/* What you get */}
+      <div style={{height:"1px",background:"#1a1a1a",margin:"8px 0"}} />
       <WhatYouGet />
     </div>
   );
@@ -253,7 +243,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <div className="logo-mark" onClick={handleFullReset} style={{cursor:"pointer"}} title="Back to home">RT</div>
+        <div className="logo-mark" onClick={handleFullReset} style={{cursor:"pointer",fontFamily:"'Inter',sans-serif",letterSpacing:"-0.02em"}} title="Back to home">RT</div>
         <div style={{cursor:"pointer"}} onClick={handleFullReset}>
           <h1>Resume Tailor</h1>
           <p style={{color:"#777",fontWeight:500,letterSpacing:"-0.01em"}}>80% yours. 20% theirs. 100% honest.</p>
@@ -299,7 +289,7 @@ export default function App() {
             >
               {status === "processing" ? (
                 <span className="btn-inner">
-                  Tailoring… {Math.round(progress)}%
+                  Tailoring… <span style={{fontWeight:800,letterSpacing:'-0.02em',marginLeft:'4px'}}>{Math.round(progress)}%</span>
                 </span>
               ) : (
                 "Tailor Resume"

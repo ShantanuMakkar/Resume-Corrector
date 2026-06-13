@@ -106,7 +106,7 @@ function DiffBlock({ entry, isAccepted, onToggle, compact }) {
       border:`1px solid ${isAccepted ? (compact?"#2a2a2a":"#363636") : "#1a1a1a"}`,
       borderRadius:"8px",overflow:"hidden",
       marginBottom: compact ? "8px" : "12px",
-      opacity: isAccepted ? 1 : 0.4,
+      opacity: isAccepted ? 1 : 0.65,
       transition:"opacity 0.2s, border-color 0.2s",
     }}>
       {/* Red row — before */}
@@ -176,7 +176,7 @@ function AnalysisPanel({ analysis }) {
     <div style={{padding:"18px 20px",borderBottom:"1px solid #1e1e1e",display:"flex",flexDirection:"column",gap:"14px"}}>
       {/* Fix #B2: missing keywords first */}
       {analysis.missingKeywords?.length > 0 && (
-        <div>
+        <div style={{paddingBottom:"14px",borderBottom:"1px solid #1a1a1a"}}>
           <div style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#cc4444",marginBottom:"8px"}}>Still missing</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:"5px"}}>
             {analysis.missingKeywords.map((kw,i) => (
@@ -186,7 +186,7 @@ function AnalysisPanel({ analysis }) {
           {analysis.missingContext && <p style={{fontSize:"12px",color:"#444",marginTop:"7px",lineHeight:1.5}}>{analysis.missingContext}</p>}
         </div>
       )}
-      <div style={{display:"flex",gap:"20px",flexWrap:"wrap",alignItems:"flex-start"}}>
+      <div style={{display:"flex",gap:"20px",flexWrap:"wrap",alignItems:"flex-start",paddingBottom:"14px",borderBottom:"1px solid #1a1a1a"}}>
         {analysis.matchScore != null && <MatchScore score={analysis.matchScore}/>}
         <div style={{flex:1,minWidth:"180px"}}>
           {analysis.titleAlignment && <p style={{fontSize:"13px",color:"#aaa",marginBottom:"6px",lineHeight:1.5}}>{analysis.titleAlignment}</p>}
@@ -243,7 +243,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
       {recs.coverLetterHooks?.length > 0 && (
         <div>
-          {secLabel("Cover letter hooks", "#c8f064")}
+          {secLabel("Cover letter hooks", "#aaa")}
           <div style={{display:"flex",flexDirection:"column",gap:"7px"}}>
             {recs.coverLetterHooks.map((hook,i) => (
               <div key={i} style={{display:"flex",alignItems:"flex-start",gap:"8px"}}>
@@ -257,7 +257,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
       {recs.suggestedBullets?.length > 0 && (
         <div>
-          {secLabel("Bullets you could add", "#4ddb8a")}
+          {secLabel("Bullets you could add", "#aaa")}
           <div style={{display:"flex",flexDirection:"column",gap:"9px"}}>
             {recs.suggestedBullets.map((item,i) => (
               <div key={i} style={{background:"rgba(40,180,90,0.05)",border:"1px solid rgba(40,180,90,0.12)",borderRadius:"7px",padding:"12px 14px"}}>
@@ -275,7 +275,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
       {recs.framingSuggestions?.length > 0 && (
         <div>
-          {secLabel("Reframe these bullets", "#7eb8ff")}
+          {secLabel("Reframe these bullets", "#aaa")}
           <div style={{display:"flex",flexDirection:"column",gap:"9px"}}>
             {recs.framingSuggestions.map((item,i) => (
               <div key={i} style={{background:"rgba(100,150,255,0.04)",border:"1px solid rgba(100,150,255,0.12)",borderRadius:"7px",padding:"12px 14px"}}>
@@ -293,7 +293,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
       {recs.skillsToAdd?.length > 0 && (
         <div>
-          {secLabel("Skills you have but didn't list", "#f0c040")}
+          {secLabel("Skills you have but didn't list", "#aaa")}
           <div style={{display:"flex",flexDirection:"column",gap:"7px"}}>
             {recs.skillsToAdd.map((item,i) => (
               <div key={i} style={{background:"rgba(240,192,64,0.04)",border:"1px solid rgba(240,192,64,0.12)",borderRadius:"7px",padding:"10px 14px"}}>
@@ -310,7 +310,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
       {recs.genuineGaps?.length > 0 && (
         <div>
-          {secLabel("Genuine gaps", "#ff6b6b")}
+          {secLabel("Genuine gaps", "#aaa")}
           <div style={{display:"flex",flexDirection:"column",gap:"7px"}}>
             {recs.genuineGaps.map((item,i) => (
               <div key={i} style={{background:"rgba(255,60,60,0.04)",border:"1px solid rgba(255,60,60,0.12)",borderRadius:"7px",padding:"10px 14px"}}>
@@ -332,6 +332,7 @@ function RecommendationsPanel({ recs, recsLoading, recsError }) {
 
 export default function ResultPanel({ originalText, tailoredText, originalFile, tailorStats, analysis, jd, onRetailor, onReset }) {
   const [view, setView] = useState("diff");
+  const [recsVisited, setRecsVisited] = useState(false);
   const [building, setBuilding] = useState(false);
   const [docxUrl, setDocxUrl] = useState(null);
   const [buildError, setBuildError] = useState("");
@@ -430,20 +431,18 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
   return (
     <div className="result-panel">
 
-      {/* Fix #6: cleaner header layout */}
-      <div className="result-header">
+      <div className="result-header" style={{borderBottom:"1px solid #1a1a1a"}}>
         <div className="result-meta">
           <span className="badge">{acceptedCount} change{acceptedCount!==1?"s":""} accepted</span>
           {tailorStats?.wordDrift !== 0 && tailorStats && (
-            <span className="badge-sub" style={{color:Math.abs(tailorStats.wordDrift)>25?"#ff8a8a":"#555"}}>
+            <span className="badge-sub" style={{color:Math.abs(tailorStats.wordDrift)>25?"#ff8a8a":"#444"}}>
               {tailorStats.wordDrift>0?"+":""}{tailorStats.wordDrift} words
             </span>
           )}
         </div>
-        {/* Fix #16: clearer button labels */}
-        <div className="result-actions">
-          <button className="btn-ghost" onClick={onRetailor}>New JD</button>
-          <button className="btn-ghost" onClick={onReset}>New resume</button>
+        <div className="result-actions" style={{gap:"6px"}}>
+          <button className="btn-ghost" onClick={onRetailor} style={{fontSize:"12px",padding:"6px 12px"}}>New JD</button>
+          <button className="btn-ghost" onClick={onReset} style={{fontSize:"12px",padding:"6px 12px",borderColor:"#222"}}>New resume</button>
         </div>
       </div>
 
@@ -457,7 +456,7 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
             {building ? <><span className="spinner spinner-sm"/> Building…</> : "↓ Download .docx"}
           </button>
           <button className="btn-gdocs" onClick={handleGoogleDocs} disabled={building}>Open in Google Docs</button>
-          <span className="gdocs-hint">Download → open in Google Docs → export as PDF</span>
+          <span className="gdocs-hint">Downloads file · open at docs.new · File → Open</span>
         </div>
         {buildError && <p className="error-msg" style={{margin:"-4px 20px 12px"}}>{buildError}</p>}
       </div>
@@ -467,11 +466,11 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
         <button className={`tab ${view==="diff"?"tab-active":""}`} onClick={() => setView("diff")}>
           Changes <span className="tab-count">{acceptedCount}</span>
         </button>
-        <button className={`tab ${view==="recs"?"tab-active":""}`} onClick={() => setView("recs")}>
+        <button className={`tab ${view==="recs"?"tab-active":""}`} onClick={() => { setView("recs"); setRecsVisited(true); }}>
           Recommendations
           {recsLoading
             ? <span className="spinner spinner-sm" style={{marginLeft:6,borderColor:"rgba(200,240,100,0.15)",borderTopColor:"#c8f064"}}/>
-            : recs && <span className="tab-count" style={{background:"rgba(200,240,100,0.08)",color:"#8ab840"}}>ready</span>
+            : recs && !recsVisited && <span className="tab-count" style={{background:"rgba(200,240,100,0.08)",color:"#8ab840",fontSize:"9px"}}>new</span>
           }
         </button>
       </div>
@@ -481,17 +480,17 @@ export default function ResultPanel({ originalText, tailoredText, originalFile, 
 
           {/* Fix #12: clear hierarchy — primary / secondary / danger */}
           {allChangedIndices.length > 0 && (
-            <div style={{display:"flex",gap:"8px",marginBottom:"18px",flexWrap:"wrap",alignItems:"center"}}>
-              <button onClick={acceptAll} style={{background:"rgba(60,220,120,0.1)",border:"1px solid rgba(60,220,120,0.25)",color:"#4ddb8a",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer",fontWeight:600}}>
+            <div style={{display:"flex",gap:"6px",marginBottom:"18px",alignItems:"center",flexWrap:"wrap"}}>
+              <button onClick={acceptAll} style={{background:"rgba(60,220,120,0.1)",border:"1px solid rgba(60,220,120,0.2)",color:"#4ddb8a",borderRadius:"6px",padding:"5px 12px",fontSize:"12px",cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>
                 Accept all
               </button>
-              <button onClick={rejectAllCosmetic} style={{background:"rgba(255,255,255,0.03)",border:"1px solid #252525",color:"#555",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer"}}>
+              <button onClick={rejectAllCosmetic} style={{background:"none",border:"1px solid #222",color:"#444",borderRadius:"6px",padding:"5px 12px",fontSize:"12px",cursor:"pointer",whiteSpace:"nowrap"}}>
                 Reject formatting
               </button>
-              <button onClick={rejectAll} style={{background:"none",border:"1px solid rgba(255,60,60,0.2)",color:"#884444",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer"}}>
+              <button onClick={rejectAll} style={{background:"none",border:"1px solid #1e1e1e",color:"#3a3a3a",borderRadius:"6px",padding:"5px 12px",fontSize:"12px",cursor:"pointer",whiteSpace:"nowrap"}}>
                 Reject all
               </button>
-              <span style={{marginLeft:"auto",fontSize:"12px",color:"#3a3a3a"}}>{acceptedCount} / {allChangedIndices.length}</span>
+              <span style={{marginLeft:"auto",fontSize:"11px",color:"#2a2a2a",fontVariantNumeric:"tabular-nums"}}>{acceptedCount}/{allChangedIndices.length}</span>
             </div>
           )}
 
