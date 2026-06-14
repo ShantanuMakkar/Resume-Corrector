@@ -232,7 +232,7 @@ export default async function handler(req, res) {
       "Field","Optional","Required","Nice","Bilingual","English","Japanese","Published",
       "Relevant","Verifiable","Proficiency","Either","Language","Excellent","Written",
       "Verbal","Interpersonal","Demonstrated","Ability","Understanding","Building","Design",
-      "Manage","Ensure","Enable","Support","Delivery","Extensive","Technical","Requirement"
+      "Manage","Ensure","Enable","Support","Delivery","Extensive","Technical","Requirement","Japanese","English","Bilingual","Language","Proficiency","Optional","Nice"
     ]);
 
     const jdTerms = [...new Set(
@@ -266,8 +266,9 @@ BULLETS (+3 word budget each):
 - Keep ALL existing tools — only ADD, never replace existing tool names in bullets
 
 SKILLS LINE (swap max 2 skills):
-- ONLY replace skills with score (1) if they don't appear in any bullet
-- Never remove tools that appear elsewhere: ELK, Splunk, Vault, OPA, Karpenter, PagerDuty, etc.
+- ONLY replace skills with score (1) if they don't appear in any bullet AND don't appear in any tech stack line
+- Never remove tools that appear elsewhere in the resume (in bullets, tech stacks, or certifications)
+- Never change tool names or capitalization (keep "Argo CD" as "Argo CD", not "ArgoCD")
 - Add: whichever missing JD keywords fit naturally in the skills line
 
 TECHNOLOGIES USED lines (+3 words):
@@ -436,16 +437,25 @@ ${jd}`;
         }
       }
 
-      // 6. Revert false migration target injection (e.g. "to RDS" → "to RDS/ElastiCache")
+      // 6. Revert false migration target injection
+      // Catches both slash ("RDS/DynamoDB") and comma ("RDS, DynamoDB, X") injection
       if (meta.isBullet && /\b(?:migrat|mov|convert|upgrad)/i.test(origLine)) {
+        // Slash detection: "RDS" → "RDS/Something"
         const origWords = origLine.split(/\s+/);
         const tailWords2 = tailLine.split(/\s+/);
-        const falseInjection = origWords.some((ow, wi) => {
+        const slashInjection = origWords.some((ow, wi) => {
           const tw = tailWords2[wi] || '';
           return !ow.includes('/') && tw.includes('/') &&
             tw.toLowerCase().startsWith(ow.toLowerCase().replace(/[,.]$/, ''));
         });
-        if (falseInjection) {
+        // Comma detection: count words between "to" and "using/with/achieving"
+        // If tail has more tech terms in that range than original, it's false injection
+        const toUsing = /\bto\s+(.+?)\s+(?:using|with|achieving|via|by)\b/i;
+        const origToUsing = origLine.match(toUsing);
+        const tailToUsing = tailLine.match(toUsing);
+        const commaInjection = origToUsing && tailToUsing &&
+          tailToUsing[1].split(/[,\/]/).length > origToUsing[1].split(/[,\/]/).length + 1;
+        if (slashInjection || commaInjection) {
           console.log(`[enforce] Line ${i+1} reverted: false migration target injection`);
           return origLine;
         }
