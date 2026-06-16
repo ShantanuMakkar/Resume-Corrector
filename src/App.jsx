@@ -132,20 +132,24 @@ export default function App() {
     return () => clearInterval(t);
   }, [status]);
 
-  // Progress simulation — jumps to 80% immediately, crawls to 95%
+  // Progress simulation — starts at 5%, climbs fast then slows near 95%
   useEffect(() => {
     if (status !== "processing") {
       if (status === "done") setProgress(100);
       else setProgress(0);
       return;
     }
-    setProgress(80);
-    let current = 80;
+    setProgress(5);
+    const startTime = Date.now();
     const tick = () => {
-      current = current + (95 - current) * 0.04;
-      setProgress(Math.min(current, 95));
+      const elapsed = Date.now() - startTime;
+      // Fast climb to ~80% in first 4s, then slow crawl to 95%
+      const p = elapsed < 4000
+        ? 5 + 75 * (elapsed / 4000)          // linear 5→80% over 4s
+        : 80 + 15 * (1 - Math.exp(-(elapsed - 4000) / 8000)); // asymptotic 80→95%
+      setProgress(Math.min(p, 95));
     };
-    const t = setInterval(tick, 300);
+    const t = setInterval(tick, 100);
     return () => clearInterval(t);
   }, [status]);
 

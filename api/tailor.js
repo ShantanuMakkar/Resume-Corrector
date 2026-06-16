@@ -432,21 +432,22 @@ ${jd}`;
         return origLine;
       }
 
-      // 5. Revert if content appended after sentence-ending outcome
-      // Catches: "savings." → "savings using Cloudfront." / "releases/month." → "releases/month using ElastiCache."
+      // 5. Revert if a new clause/sentence was appended after the original ending
+      // Only catches additions AFTER the original content ends, not mid-sentence additions
       if (meta.isBullet && origLine.trim().endsWith('.')) {
-        const origLen = origLine.trim().length;
-        const tailSuffix = tailLine.trim().slice(origLen - 5);
-        // If tail adds "using X", "via X", "with X", "across X" after where original ended
-        if (/\b(using|via|across|through)\s+\w/.test(tailSuffix)) {
-          console.log(`[enforce] Line ${i+1} reverted: suffix appended after sentence end`);
+        // Count sentences: if tail has more sentences than original, something was appended
+        const countSentences = s => (s.match(/[.!?]/g) || []).length;
+        const origSentences = countSentences(origLine);
+        const tailSentences = countSentences(tailLine);
+        if (tailSentences > origSentences) {
+          console.log(`[enforce] Line ${i+1} reverted: sentence appended after original`);
           return origLine;
         }
-        // Also catch if original ends with period but tail has extra content after a mid-sentence period
-        const origAfterLastDot = origLine.trim().slice(origLine.trim().lastIndexOf('.') + 1).trim();
-        const tailAfterLastDot = tailLine.trim().slice(tailLine.trim().lastIndexOf('.') + 1).trim();
-        if (origAfterLastDot === '' && tailAfterLastDot !== '') {
-          console.log(`[enforce] Line ${i+1} reverted: content added after final period`);
+        // Also check: if tail is meaningfully longer AND the extra content comes after the original ending
+        // by checking if original text is a prefix of tail (with only additions at end)
+        const origTrimmed = origLine.trim().slice(0, -1); // remove final period
+        if (tailLine.trim().startsWith(origTrimmed) && tailLine.trim().length > origTrimmed.length + 10) {
+          console.log(`[enforce] Line ${i+1} reverted: content appended after sentence`);
           return origLine;
         }
       }
