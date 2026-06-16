@@ -302,9 +302,14 @@ Inject missing keywords. Keep ranking numbers. Touch every relevant bullet.`;
     const analysisPrompt = `Analyze this resume against the job description.
 Return ONLY valid JSON — no markdown, no code fences.
 
+RULES:
+- matchedKeywords and missingKeywords must be MUTUALLY EXCLUSIVE — a keyword cannot appear in both
+- Only include TECHNICAL TOOLS and CLOUD SERVICES — not certifications (CKA/CKAD), not languages (Japanese), not compliance phrases, not optional skills (Go/Rust, CDK)
+- missingKeywords: only list tools that are genuinely absent AND injectable into the resume
+
 {
-  "matchedKeywords": [<up to 12 JD keywords in resume>],
-  "missingKeywords": [<up to 10 JD keywords absent, most critical first>],
+  "matchedKeywords": [<up to 12 JD technical tools/services present in resume>],
+  "missingKeywords": [<up to 10 JD critical technical tools/services NOT in resume, most impactful first>],
   "missingContext": "<one sentence: most critical gap>",
   "titleAlignment": "<one sentence: how well title/seniority matches>",
   "recommendation": "<1-2 sentences: honest fit + strongest talking point>"
@@ -427,12 +432,21 @@ ${jd}`;
         return origLine;
       }
 
-      // 5. Revert if keyword appended after a metric ("by 25% across EC2" / "to 100% via KMS")
-      if (meta.isBullet) {
-        const origEndsWithMetric = /\b\d+[%kKmM]?\.\s*$/.test(origLine.trim());
-        const tailEndsWithMetric = /\b\d+[%kKmM]?\.\s*$/.test(tailLine.trim());
-        if (origEndsWithMetric && !tailEndsWithMetric) {
-          console.log(`[enforce] Line ${i+1} reverted: keyword appended after metric`);
+      // 5. Revert if content appended after sentence-ending outcome
+      // Catches: "savings." → "savings using Cloudfront." / "releases/month." → "releases/month using ElastiCache."
+      if (meta.isBullet && origLine.trim().endsWith('.')) {
+        const origLen = origLine.trim().length;
+        const tailSuffix = tailLine.trim().slice(origLen - 5);
+        // If tail adds "using X", "via X", "with X", "across X" after where original ended
+        if (/\b(using|via|across|through)\s+\w/.test(tailSuffix)) {
+          console.log(`[enforce] Line ${i+1} reverted: suffix appended after sentence end`);
+          return origLine;
+        }
+        // Also catch if original ends with period but tail has extra content after a mid-sentence period
+        const origAfterLastDot = origLine.trim().slice(origLine.trim().lastIndexOf('.') + 1).trim();
+        const tailAfterLastDot = tailLine.trim().slice(tailLine.trim().lastIndexOf('.') + 1).trim();
+        if (origAfterLastDot === '' && tailAfterLastDot !== '') {
+          console.log(`[enforce] Line ${i+1} reverted: content added after final period`);
           return origLine;
         }
       }
