@@ -460,12 +460,17 @@ ${jd}`;
 
       // 0. CRITICAL: revert if line was swapped with a completely different line
       // (similarity too low means content was replaced, not edited)
-      if (meta.isBullet || meta.isSkills || meta.isTechStack) {
+      // Applies to EVERY line type — headers, dates, project lines, bullets, skills —
+      // not just bullets/skills/tech. A header line shifting to a different header's
+      // content is just as much a corruption as a bullet getting swapped.
+      {
         const origWordSet = new Set(origLine.toLowerCase().split(/\s+/).filter(Boolean));
         const tailWords = tailLine.toLowerCase().split(/\s+/).filter(Boolean);
         const overlap = tailWords.filter(w => origWordSet.has(w)).length;
         const overlapRatio = overlap / Math.max(origWordSet.size, 1);
-        if (overlapRatio < 0.4 && origWordSet.size > 5) {
+        // Lowered the minimum word-count guard from 5 to 1 so short lines (headers,
+        // section titles like "HOBBIES", "EDUCATION") are protected too.
+        if (overlapRatio < 0.4 && origWordSet.size >= 1) {
           console.log(`[enforce] Line ${i+1} reverted: low overlap (${(overlapRatio*100).toFixed(0)}%) — likely swapped with different line`);
           return origLine;
         }
