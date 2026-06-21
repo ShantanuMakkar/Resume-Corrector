@@ -281,15 +281,17 @@ HARD COUNTS:
 - Output EXACTLY ${contentLineCount} lines
 - No line numbers or labels
 - Keep (N) rankings in skills line
+- CRITICAL: Output lines in the EXACT SAME ORDER as the input. Do not reorder, swap, or shuffle lines.
+  Each output line N must be a modified (or unmodified) version of input line N — never a different line's content.
 
-LINES TO MODIFY:
-${candidateLines.map(({ line, meta }) => {
+LINES TO MODIFY (line number : current content):
+${candidateLines.map(({ line, meta, idx }) => {
   const t = line.trim();
   const tag = meta.isBullet ? "[bullet]" : meta.isSkills ? "[skills]" : meta.isTechStack ? "[tech]" : "[SKIP-summary]";
-  return `${tag}: ${t.slice(0, 65)}${t.length > 65 ? "…" : ""}`;
+  return `Line ${idx + 1} ${tag}: ${t.slice(0, 65)}${t.length > 65 ? "…" : ""}`;
 }).join("\n")}
 
-OUTPUT: ${contentLineCount} lines. Plain text only.`;
+OUTPUT: ${contentLineCount} lines, same order as input. Plain text only.`;
 
     const userPrompt = `JOB DESCRIPTION (technical requirements extracted):
 ${jd}
@@ -408,6 +410,19 @@ ${jd}`;
       const tailLine = tailoredContentLines[i] ?? origLine;
       if (!tailLine.trim()) return origLine;
 
+      // 0. CRITICAL: revert if line was swapped with a completely different line
+      // (similarity too low means content was replaced, not edited)
+      if (meta.isBullet || meta.isSkills || meta.isTechStack) {
+        const origWordSet = new Set(origLine.toLowerCase().split(/\s+/).filter(Boolean));
+        const tailWords = tailLine.toLowerCase().split(/\s+/).filter(Boolean);
+        const overlap = tailWords.filter(w => origWordSet.has(w)).length;
+        const overlapRatio = overlap / Math.max(origWordSet.size, 1);
+        if (overlapRatio < 0.4 && origWordSet.size > 5) {
+          console.log(`[enforce] Line ${i+1} reverted: low overlap (${(overlapRatio*100).toFixed(0)}%) — likely swapped with different line`);
+          return origLine;
+        }
+      }
+
       // 1. Always protect first 5 content lines (name, summary, contact)
       if (i < 5) return origLine;
 
@@ -433,20 +448,19 @@ ${jd}`;
       }
 
       // 5. Revert if a new clause/sentence was appended after the original ending
-      // Only catches additions AFTER the original content ends, not mid-sentence additions
       if (meta.isBullet && origLine.trim().endsWith('.')) {
-        // Count sentences: if tail has more sentences than original, something was appended
-        const countSentences = s => (s.match(/[.!?]/g) || []).length;
-        const origSentences = countSentences(origLine);
-        const tailSentences = countSentences(tailLine);
-        if (tailSentences > origSentences) {
+        const stripBullet = s => s.trim().replace(/^[•●–\-]\s+/, '').trim();
+        const origClean = stripBullet(origLine);
+        const tailClean = stripBullet(tailLine);
+        // Count sentences: if tail has more, something was appended
+        const countS = s => (s.match(/[.!?]/g) || []).length;
+        if (countS(tailClean) > countS(origClean)) {
           console.log(`[enforce] Line ${i+1} reverted: sentence appended after original`);
           return origLine;
         }
-        // Also check: if tail is meaningfully longer AND the extra content comes after the original ending
-        // by checking if original text is a prefix of tail (with only additions at end)
-        const origTrimmed = origLine.trim().slice(0, -1); // remove final period
-        if (tailLine.trim().startsWith(origTrimmed) && tailLine.trim().length > origTrimmed.length + 10) {
+        // If tail starts with original content but adds 10+ chars after
+        const origWithoutPeriod = origClean.slice(0, -1);
+        if (tailClean.startsWith(origWithoutPeriod) && tailClean.length > origWithoutPeriod.length + 10) {
           console.log(`[enforce] Line ${i+1} reverted: content appended after sentence`);
           return origLine;
         }
