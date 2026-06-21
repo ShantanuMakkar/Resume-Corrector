@@ -239,12 +239,43 @@ export default async function handler(req, res) {
       (jd.match(/\b[A-Z][a-zA-Z0-9]*(?:\/[A-Z][a-zA-Z0-9]*)?\b/g) || [])
         .filter(t => t.length > 2 && !["The","This","We","Our","You","For","With","And","But","Has","Are","Not","All","Any","Can","May","Will"].includes(t))
     )];
-    const promptMissingKws = jdTerms.filter(t => !resumeText.toLowerCase().includes(t.toLowerCase()) && !NON_TECH_JD_WORDS.has(t)).slice(0, 15);
+    // Filter promptMissingKws to only genuine tech terms — exclude company names,
+    // role/title words, and generic phrasing that happens to be capitalized in the JD
+    // Frequency check: words appearing 3+ times are likely the company name or repeated role title, not a specific tool
+    const jdWordFrequency = {};
+    (jd.match(/\b[A-Z][a-zA-Z0-9]*\b/g) || []).forEach(w => {
+      jdWordFrequency[w] = (jdWordFrequency[w] || 0) + 1;
+    });
+    const isLikelyTechTerm = (t) => {
+      // All-caps acronyms (EC2, KMS, MSK, VPC, CDK) — always tech, even if frequent
+      if (/^[A-Z0-9]{2,8}$/.test(t)) return true;
+      // Frequent single words (3+ occurrences) are likely company/role names, not specific tools
+      if ((jdWordFrequency[t] || 0) >= 3) return false;
+      // Contains a digit (S3, EC2, Web3) — likely tech
+      if (/[0-9]/.test(t)) return true;
+      // CamelCase with multiple capitals (CloudFormation, OpenTelemetry, DynamoDB) — likely tech
+      if (/[A-Z].*[A-Z]/.test(t) && t.length > 4) return true;
+      // Single capitalized word — only keep if NOT a generic business/role word
+      const GENERIC_BUSINESS_WORDS = new Set([
+        "Card","Platform","Platforms","Infrastructure","Cloud","Engineer","Engineering",
+        "Company","Team","Product","Service","Services","Solution","Solutions","Business",
+        "Customer","Customers","User","Users","Application","Applications","System","Systems",
+        "Project","Projects","Department","Division","Group","Industry","Market","Global"
+      ]);
+      return !GENERIC_BUSINESS_WORDS.has(t);
+    };
+    const promptMissingKws = jdTerms
+      .filter(t => !resumeText.toLowerCase().includes(t.toLowerCase()) && !NON_TECH_JD_WORDS.has(t) && isLikelyTechTerm(t))
+      .slice(0, 15);
 
     const systemPrompt = `You are an ATS resume keyword injector. Inject missing JD keywords into bullets and tech stack lines ONLY.
 
 MISSING JD KEYWORDS TO INJECT:
 ${promptMissingKws.length > 0 ? promptMissingKws.join(", ") : "Extract missing technical keywords from the JD"}
+
+ONLY inject from the list above. Do NOT invent your own keywords from reading the JD text.
+NEVER inject: company names, product names, team names, or generic words like "Platform", "Card", "Service", "Cloud" on their own — these are not technologies.
+A valid injection is a specific tool, language, cloud service, or protocol (e.g. "Terraform", "EC2", "OAuth2") — never a business or brand term.
 
 ═══ STRICT RULES (violations will be reverted server-side) ═══
 
@@ -387,13 +418,13 @@ ${jd}`;
           if (GENERIC_WORDS.has(t) || NON_TECH_JD_WORDS.has(t)) return false;
           // Keep: all-caps acronyms (EC2, EKS, MSK, KMS, VPC, CDK, IAC)
           if (/^[A-Z0-9]{2,8}$/.test(t)) return true;
+          // Exclude frequent words (3+ occurrences) — likely company name or repeated role title
+          if ((jdWordFrequency[t] || 0) >= 3) return false;
           // Keep: known tech patterns (starts with capital, contains numbers or mixed case)
           if (/[0-9]/.test(t)) return true; // EC2, S3, EKS, Grafana2 etc
           // Keep: camelCase tech names (OpenTelemetry, ArgoCD, CloudFormation, DynamoDB)
           if (/[A-Z].*[A-Z]/.test(t) && t.length > 4) return true;
-          // Keep: specific known tools (single-word capitalised tech names >= 4 chars)
           // Single-word capitalised tech names >= 5 chars not caught by other patterns
-          // Heuristic: if it appears in the JD as a standalone term, it's likely a tool
           return t.length >= 5 && /^[A-Z][a-z]+([A-Z][a-z]*)*$/.test(t);
         })
     )];
@@ -410,6 +441,21 @@ ${jd}`;
       const tailLine = tailoredContentLines[i] ?? origLine;
       if (!tailLine.trim()) return origLine;
 
+      // -1. Revert if a forbidden business/brand word was injected as a fake keyword
+      const FORBIDDEN_INJECTIONS = ["paypay", "card", "platform", "platforms", "cloud", "service", "services", "company", "team", "product", "solution", "solutions", "business", "engineering"];
+      if (meta.isBullet || meta.isSkills || meta.isTechStack) {
+        const origLower = origLine.toLowerCase();
+        const tailLower = tailLine.toLowerCase();
+        const newlyAddedForbidden = FORBIDDEN_INJECTIONS.some(w => {
+          const re = new RegExp(`\\b${w}\\b`, "i");
+          return re.test(tailLower) && !re.test(origLower);
+        });
+        if (newlyAddedForbidden) {
+          console.log(`[enforce] Line ${i+1} reverted: forbidden business word injected`);
+          return origLine;
+        }
+      }
+
       // 0. CRITICAL: revert if line was swapped with a completely different line
       // (similarity too low means content was replaced, not edited)
       if (meta.isBullet || meta.isSkills || meta.isTechStack) {
@@ -423,6 +469,20 @@ ${jd}`;
         }
       }
 
+      // 1.5. Revert if a filler word survived alongside an injected keyword (grammatically broken)
+      // e.g. "SQS, EC2, Cloudfront, MWAA ingestion" — "ingestion" should have been removed, not left dangling
+      if (meta.isBullet) {
+        const FILLER_WORDS = ["ingestion", "scripting"];
+        for (const filler of FILLER_WORDS) {
+          const origHasFiller = new RegExp(`\\b${filler}\\b`, "i").test(origLine);
+          const tailHasFiller = new RegExp(`\\b${filler}\\b`, "i").test(tailLine);
+          if (origHasFiller && tailHasFiller && tailLine !== origLine) {
+            console.log(`[enforce] Line ${i+1} reverted: filler word "${filler}" left dangling after injection`);
+            return origLine;
+          }
+        }
+      }
+
       // 1. Always protect first 5 content lines (name, summary, contact)
       if (i < 5) return origLine;
 
@@ -430,6 +490,21 @@ ${jd}`;
       if (meta.isSkills && skillsRankingLost(origLine, tailLine)) {
         console.log(`[enforce] Line ${i+1} reverted: skills ranking lost`);
         return origLine;
+      }
+
+      // 2b. Skills: revert if an added word matches a frequent JD brand/company term
+      // (heuristic: words appearing 2+ times in JD that aren't in our tech allowlist)
+      if (meta.isSkills) {
+        const origWordSet = new Set(origLine.toLowerCase().split(/\s+/).filter(Boolean));
+        const addedWords = tailLine.toLowerCase().split(/\s+/).filter(w => !origWordSet.has(w) && w.length > 3);
+        const suspicious = addedWords.some(w => {
+          const clean = w.replace(/[^a-z0-9]/g, "");
+          return !promptMissingKws.some(kw => kw.toLowerCase().replace(/[^a-z0-9]/g, "") === clean);
+        });
+        if (suspicious) {
+          console.log(`[enforce] Line ${i+1} reverted: skills line added a word not in approved keyword list`);
+          return origLine;
+        }
       }
 
       const tailWords = tailLine.trim().split(/\s+/).filter(Boolean).length;
