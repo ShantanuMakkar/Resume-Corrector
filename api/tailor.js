@@ -291,6 +291,8 @@ INJECT INTO — bullets and tech stack lines ONLY:
 BULLETS (+3 word budget each):
 - Add keywords INLINE using slashes or commas: "Lambda/Tool1/Tool2" or "ELK, Splunk, and NewTool"
 - NEVER use parentheses: not "(Tool)" — always inline
+- Preserve correct punctuation: if inserting before a comma-separated clause, keep the comma (e.g. "SQS, EC2, SNS, boosting throughput" not "SQS, EC2, SNS boosting throughput")
+- GRAMMAR: always keep a comma between the injected list and what follows (e.g. "SQS, EC2, SNS, boosting throughput" — NOT "SQS, EC2, SNS boosting throughput")
 - NEVER remove: tools, metrics (%), numbers, outcomes, company-specific context
 - Remove ONLY exact filler: the word "ingestion" after SQS, the word "scripting" after Bash/Python
 - If no filler exists: append at end of tech list — "...using Terraform, CloudFormation, and CodePipeline"
@@ -442,6 +444,23 @@ ${jd}`;
       if (!tailLine.trim()) return origLine;
 
       // -1. Revert if a forbidden business/brand word was injected as a fake keyword
+      // Also reject if a known multi-word tool name was corrupted (e.g. "Argo CD" → "Argo Strong")
+      // Check: does the original contain a known tool's first word followed by something that's
+      // no longer the tool's actual second word, but a generic English adjective/noun?
+      const MULTIWORD_TOOLS = ["Argo CD", "Cost Explorer", "CIS Benchmarks", "Secrets Manager", "Security Groups", "API Gateway"];
+      const GENERIC_LEAKED_WORDS = ["strong", "good", "excellent", "demonstrated", "proactive", "successful", "effective", "advantageous", "crucial", "highly"];
+      for (const tool of MULTIWORD_TOOLS) {
+        const [first, second] = tool.split(" ");
+        const origHasTool = new RegExp(`\\b${first}\\s+${second}\\b`, "i").test(origLine);
+        if (origHasTool) {
+          const corruptedPattern = new RegExp(`\\b${first}\\s+(${GENERIC_LEAKED_WORDS.join("|")})\\b`, "i");
+          if (corruptedPattern.test(tailLine) && !new RegExp(`\\b${first}\\s+${second}\\b`, "i").test(tailLine)) {
+            console.log(`[enforce] Line ${i+1} reverted: "${tool}" corrupted with leaked JD word`);
+            return origLine;
+          }
+        }
+      }
+
       const FORBIDDEN_INJECTIONS = ["paypay", "card", "platform", "platforms", "service", "services", "company", "team", "product", "solution", "solutions", "business"];
 
       // Also reject if 2+ consecutive generic/section-header words were injected together
