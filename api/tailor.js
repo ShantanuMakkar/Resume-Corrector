@@ -260,7 +260,10 @@ export default async function handler(req, res) {
         "Card","Platform","Platforms","Infrastructure","Cloud","Engineer","Engineering",
         "Company","Team","Product","Service","Services","Solution","Solutions","Business",
         "Customer","Customers","User","Users","Application","Applications","System","Systems",
-        "Project","Projects","Department","Division","Group","Industry","Market","Global"
+        "Project","Projects","Department","Division","Group","Industry","Market","Global",
+        "Consultant","Finance","Perform","Implement","Automate","Strong","Familiarity",
+        "Familiar","Knowledge","Hands","Solid","Proven","Routine","Amazon","We","This",
+        "The","You","Our","Your","Their","His","Her","Its"
       ]);
       return !GENERIC_BUSINESS_WORDS.has(t);
     };
@@ -417,26 +420,17 @@ ${jd}`;
     const allJdTerms = [...new Set(
       (jd.match(/\b[A-Z][a-zA-Z0-9]{1,}\b/g) || [])
         .filter(t => {
-          if (GENERIC_WORDS.has(t) || NON_TECH_JD_WORDS.has(t)) return false;
-          // Keep: all-caps acronyms (EC2, EKS, MSK, KMS, VPC, CDK, IAC)
-          if (/^[A-Z0-9]{2,8}$/.test(t)) return true;
-          // Exclude frequent words (3+ occurrences) — likely company name or repeated role title
-          if ((jdWordFrequency[t] || 0) >= 3) return false;
-          // Keep: known tech patterns (starts with capital, contains numbers or mixed case)
-          if (/[0-9]/.test(t)) return true; // EC2, S3, EKS, Grafana2 etc
-          // Keep: camelCase tech names (OpenTelemetry, ArgoCD, CloudFormation, DynamoDB)
-          if (/[A-Z].*[A-Z]/.test(t) && t.length > 4) return true;
-          // Single-word capitalised tech names >= 5 chars not caught by other patterns
-          return t.length >= 5 && /^[A-Z][a-z]+([A-Z][a-z]*)*$/.test(t);
+          if (t.length < 3 && !/^[A-Z0-9]{2,8}$/.test(t)) return false; // drop short non-acronym words like "We"
+          return !GENERIC_WORDS.has(t) && !NON_TECH_JD_WORDS.has(t) && isLikelyTechTerm(t);
         })
     )];
     const beforeScore = keywordScore(resumeText, allJdTerms, []);
 
-    // Gemini lists used for display only (keyword tags in UI)
-    const matchedKws = analysis?.matchedKeywords || [];
-    const missingKws = (analysis?.missingKeywords || []).filter(k =>
-      !matchedKws.some(m => m.toLowerCase() === k.toLowerCase())
-    );
+    // Deterministic matched/missing — derived from allJdTerms, NOT from Gemini's analysis.
+    // Gemini's keyword lists vary run-to-run on the same JD; this does not.
+    // Gemini's analysis is still used for qualitative text (recommendation, titleAlignment, missingContext).
+    const matchedKws = allJdTerms.filter(t => resumeText.toLowerCase().includes(t.toLowerCase()));
+    const missingKws = allJdTerms.filter(t => !resumeText.toLowerCase().includes(t.toLowerCase()));
 
     // Enforce per-line budgets — also enforce minimum (no truncation)
     const correctedContent = contentLines.map(({ line: origLine, meta }, i) => {
@@ -615,9 +609,17 @@ ${jd}`;
     // Deterministic after score: same JD terms, now against tailored text
     const afterScore = keywordScore(tailoredText, allJdTerms, []);
 
+    // Deterministic after-tailoring missing list — which allJdTerms are STILL absent post-injection
+    const afterMissingKws = allJdTerms.filter(t => !tailoredText.toLowerCase().includes(t.toLowerCase()));
+    const afterMatchedKws = allJdTerms.filter(t => tailoredText.toLowerCase().includes(t.toLowerCase()));
+
     if (analysis) {
       analysis.beforeScore = beforeScore;
       analysis.matchScore = afterScore;
+      // Override Gemini's inconsistent keyword lists with deterministic ones.
+      // Show post-tailoring state: what's matched/missing in the FINAL resume the user downloads.
+      analysis.matchedKeywords = afterMatchedKws.slice(0, 12);
+      analysis.missingKeywords = afterMissingKws.slice(0, 10);
     }
 
     return res.status(200).json({
