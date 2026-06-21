@@ -444,20 +444,23 @@ ${jd}`;
       if (!tailLine.trim()) return origLine;
 
       // -1. Revert if a forbidden business/brand word was injected as a fake keyword
-      // Also reject if a known multi-word tool name was corrupted (e.g. "Argo CD" → "Argo Strong")
-      // Check: does the original contain a known tool's first word followed by something that's
-      // no longer the tool's actual second word, but a generic English adjective/noun?
-      const MULTIWORD_TOOLS = ["Argo CD", "Cost Explorer", "CIS Benchmarks", "Secrets Manager", "Security Groups", "API Gateway"];
-      const GENERIC_LEAKED_WORDS = ["strong", "good", "excellent", "demonstrated", "proactive", "successful", "effective", "advantageous", "crucial", "highly"];
-      for (const tool of MULTIWORD_TOOLS) {
-        const [first, second] = tool.split(" ");
-        const origHasTool = new RegExp(`\\b${first}\\s+${second}\\b`, "i").test(origLine);
-        if (origHasTool) {
-          const corruptedPattern = new RegExp(`\\b${first}\\s+(${GENERIC_LEAKED_WORDS.join("|")})\\b`, "i");
-          if (corruptedPattern.test(tailLine) && !new RegExp(`\\b${first}\\s+${second}\\b`, "i").test(tailLine)) {
-            console.log(`[enforce] Line ${i+1} reverted: "${tool}" corrupted with leaked JD word`);
-            return origLine;
-          }
+      // Reject if a generic JD "soft language" word leaked in as a fake keyword
+      // These are adjectives/qualifiers from JD prose (e.g. "Strong understanding...",
+      // "Familiarity with...", "Demonstrated experience...") — never real skills
+      const SOFT_LANGUAGE_WORDS = ["strong", "good", "excellent", "demonstrated", "proactive",
+        "successful", "effective", "advantageous", "crucial", "highly", "familiarity",
+        "familiar", "knowledge", "understanding", "experience", "skills", "ability",
+        "expertise", "exposure", "hands-on", "extensive", "solid", "proven"];
+      if (meta.isBullet || meta.isSkills || meta.isTechStack) {
+        const origLowerCheck = origLine.toLowerCase();
+        const tailLowerCheck = tailLine.toLowerCase();
+        const leakedWord = SOFT_LANGUAGE_WORDS.find(w => {
+          const re = new RegExp(`\\b${w}\\b`, "i");
+          return re.test(tailLowerCheck) && !re.test(origLowerCheck);
+        });
+        if (leakedWord) {
+          console.log(`[enforce] Line ${i+1} reverted: soft-language JD word "${leakedWord}" leaked as fake keyword`);
+          return origLine;
         }
       }
 
