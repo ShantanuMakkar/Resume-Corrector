@@ -442,7 +442,20 @@ ${jd}`;
       if (!tailLine.trim()) return origLine;
 
       // -1. Revert if a forbidden business/brand word was injected as a fake keyword
-      const FORBIDDEN_INJECTIONS = ["paypay", "card", "platform", "platforms", "cloud", "service", "services", "company", "team", "product", "solution", "solutions", "business", "engineering"];
+      const FORBIDDEN_INJECTIONS = ["paypay", "card", "platform", "platforms", "service", "services", "company", "team", "product", "solution", "solutions", "business"];
+
+      // Also reject if 2+ consecutive generic/section-header words were injected together
+      // (e.g. "Linux, Windows, administration, maintenance" — dumped JD header words, not real skills)
+      if (meta.isBullet) {
+        const SECTION_HEADER_WORDS = ["administration", "maintenance", "implementation", "monitoring", "automation"];
+        const origWords = new Set(origLine.toLowerCase().split(/\W+/).filter(Boolean));
+        const tailWordsArr = tailLine.toLowerCase().split(/\W+/).filter(Boolean);
+        const newSectionWords = tailWordsArr.filter(w => SECTION_HEADER_WORDS.includes(w) && !origWords.has(w));
+        if (newSectionWords.length >= 2) {
+          console.log(`[enforce] Line ${i+1} reverted: dumped JD section-header words (${newSectionWords.join(", ")})`);
+          return origLine;
+        }
+      }
       if (meta.isBullet || meta.isSkills || meta.isTechStack) {
         const origLower = origLine.toLowerCase();
         const tailLower = tailLine.toLowerCase();
