@@ -166,6 +166,63 @@ function sanitiseForXml(text) {
     .replace(/[\uFFFE\uFFFF]/g, "");
 }
 
+// Single source of truth for JD technical term extraction.
+// Used for: prompt injection targets, before/after scoring, and the missing-keywords display.
+// Having ONE extraction function (instead of duplicated logic in multiple places)
+// guarantees the score, the injection targets, and the displayed "still missing" list
+// are always derived from the same keyword set.
+const NON_TECH_JD_WORDS = new Set([
+  "Automations","Responsibilities","Deployments","Provide","Architect","Services",
+  "Engineers","Infrastructure","Requirements","Qualifications","Please","Have","Must",
+  "Will","This","With","From","Your","Their","More","Other","Both","Also","Such",
+  "Each","These","Those","Main","Work","Tech","Stack","Cloud","Security","Than",
+  "Years","Good","Should","About","Above","Some","Only","Just","Very","Most","Well",
+  "Even","Many","Much","Still","High","Best","Fast","Easy","Full","Free","Open","Next",
+  "Last","Team","Role","Time","Type","Data","Code","Test","User","File","Tool","Area",
+  "Page","List","Item","Base","Core","Mode","Path","Port","Task","Step","Flow","Call",
+  "Real","Live","Side","Back","Part","Used","Need","Help","Make","Give","Keep","Take",
+  "Know","Show","Find","Turn","Move","Come","Want","Like","Look","Into","Over","Then",
+  "When","Here","There","Where","Been","They","Were","What","Which","While","After",
+  "Before","Since","Until","During","Within","Between","Against","Through","Around",
+  "Below","Under","Along","Across","Behind","Beyond","Inside","Outside","Secret",
+  "Manager","Based","Regional","Failure","Tolerance","Industry","Standards","Compliance",
+  "Payment","Large","Scale","Distributed","Preferred","Bachelor","Degree","Related",
+  "Field","Optional","Required","Nice","Bilingual","English","Japanese","Published",
+  "Relevant","Verifiable","Proficiency","Either","Language","Excellent","Written",
+  "Verbal","Interpersonal","Demonstrated","Ability","Understanding","Building","Design",
+  "Manage","Ensure","Enable","Support","Delivery","Extensive","Technical","Requirement",
+  "Card","Platform","Platforms","Engineer","Engineering","Company","Product","Solution",
+  "Solutions","Business","Customer","Customers","Users","Application","Applications",
+  "System","Systems","Project","Projects","Department","Division","Group","Market",
+  "Global","Consultant","Finance","Perform","Implement","Automate","Strong","Familiarity",
+  "Familiar","Knowledge","Hands","Solid","Proven","Routine","Amazon","We","You","Our",
+  "Their","His","Her","Its"
+]);
+
+function extractJdTechTerms(jd) {
+  // Frequency check: words appearing 3+ times are likely the company/role name, not a tool
+  const wordFrequency = {};
+  (jd.match(/\b[A-Z][a-zA-Z0-9]*\b/g) || []).forEach(w => {
+    wordFrequency[w] = (wordFrequency[w] || 0) + 1;
+  });
+
+  const isLikelyTechTerm = (t) => {
+    if (/^[A-Z0-9]{2,8}$/.test(t)) return true; // acronyms always pass (EC2, KMS, VPC)
+    if ((wordFrequency[t] || 0) >= 3) return false; // frequent word = company/role name
+    if (/[0-9]/.test(t)) return true; // contains digit (S3, EC2)
+    if (/[A-Z].*[A-Z]/.test(t) && t.length > 4) return true; // CamelCase (CloudFormation)
+    return !NON_TECH_JD_WORDS.has(t);
+  };
+
+  return [...new Set(
+    (jd.match(/\b[A-Z][a-zA-Z0-9]*(?:\/[A-Z][a-zA-Z0-9]*)?\b/g) || [])
+      .filter(t => {
+        if (t.length < 3 && !/^[A-Z0-9]{2,8}$/.test(t)) return false;
+        return !NON_TECH_JD_WORDS.has(t) && isLikelyTechTerm(t);
+      })
+  )];
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
@@ -211,64 +268,11 @@ export default async function handler(req, res) {
     const summaryText = contentLines.slice(0, 4).map(l => l.line).join(" ");
     const summaryAlreadyGood = similarityScore(summaryText, jd.slice(0, 500)) > 0.25;
 
-    // Pre-compute missing keywords from JD vs resume for use in prompt
-    // Unified filter for non-technical words from JD
-    const NON_TECH_JD_WORDS = new Set([
-      "Automations","Responsibilities","Deployments","Provide","Architect","Services",
-      "Engineers","Infrastructure","Requirements","Qualifications","Please","Have","Must",
-      "Will","This","With","From","Your","Their","More","Other","Both","Also","Such",
-      "Each","These","Those","Main","Work","Tech","Stack","Cloud","Security","More","Than",
-      "Years","Good","Should","About","Above","Some","Only","Just","Very","Most","Well",
-      "Even","Many","Much","Still","High","Best","Fast","Easy","Full","Free","Open","Next",
-      "Last","Team","Role","Time","Type","Data","Code","Test","User","File","Tool","Area",
-      "Page","List","Item","Base","Core","Mode","Path","Port","Task","Step","Flow","Call",
-      "Real","Live","Side","Back","Part","Used","Need","Help","Make","Give","Keep","Take",
-      "Know","Show","Find","Turn","Move","Come","Want","Like","Look","Into","Over","Then",
-      "When","Here","There","Where","Been","They","Were","What","Which","While","After",
-      "Before","Since","Until","During","Within","Between","Against","Through","Around",
-      "Below","Under","Along","Across","Behind","Beyond","Inside","Outside","Secret",
-      "Manager","Based","Regional","Failure","Tolerance","Industry","Standards","Compliance",
-      "Payment","Large","Scale","Distributed","Preferred","Bachelor","Degree","Related",
-      "Field","Optional","Required","Nice","Bilingual","English","Japanese","Published",
-      "Relevant","Verifiable","Proficiency","Either","Language","Excellent","Written",
-      "Verbal","Interpersonal","Demonstrated","Ability","Understanding","Building","Design",
-      "Manage","Ensure","Enable","Support","Delivery","Extensive","Technical","Requirement","Japanese","English","Bilingual","Language","Proficiency","Optional","Nice"
-    ]);
-
-    const jdTerms = [...new Set(
-      (jd.match(/\b[A-Z][a-zA-Z0-9]*(?:\/[A-Z][a-zA-Z0-9]*)?\b/g) || [])
-        .filter(t => t.length > 2 && !["The","This","We","Our","You","For","With","And","But","Has","Are","Not","All","Any","Can","May","Will"].includes(t))
-    )];
-    // Filter promptMissingKws to only genuine tech terms — exclude company names,
-    // role/title words, and generic phrasing that happens to be capitalized in the JD
-    // Frequency check: words appearing 3+ times are likely the company name or repeated role title, not a specific tool
-    const jdWordFrequency = {};
-    (jd.match(/\b[A-Z][a-zA-Z0-9]*\b/g) || []).forEach(w => {
-      jdWordFrequency[w] = (jdWordFrequency[w] || 0) + 1;
-    });
-    const isLikelyTechTerm = (t) => {
-      // All-caps acronyms (EC2, KMS, MSK, VPC, CDK) — always tech, even if frequent
-      if (/^[A-Z0-9]{2,8}$/.test(t)) return true;
-      // Frequent single words (3+ occurrences) are likely company/role names, not specific tools
-      if ((jdWordFrequency[t] || 0) >= 3) return false;
-      // Contains a digit (S3, EC2, Web3) — likely tech
-      if (/[0-9]/.test(t)) return true;
-      // CamelCase with multiple capitals (CloudFormation, OpenTelemetry, DynamoDB) — likely tech
-      if (/[A-Z].*[A-Z]/.test(t) && t.length > 4) return true;
-      // Single capitalized word — only keep if NOT a generic business/role word
-      const GENERIC_BUSINESS_WORDS = new Set([
-        "Card","Platform","Platforms","Infrastructure","Cloud","Engineer","Engineering",
-        "Company","Team","Product","Service","Services","Solution","Solutions","Business",
-        "Customer","Customers","User","Users","Application","Applications","System","Systems",
-        "Project","Projects","Department","Division","Group","Industry","Market","Global",
-        "Consultant","Finance","Perform","Implement","Automate","Strong","Familiarity",
-        "Familiar","Knowledge","Hands","Solid","Proven","Routine","Amazon","We","This",
-        "The","You","Our","Your","Their","His","Her","Its"
-      ]);
-      return !GENERIC_BUSINESS_WORDS.has(t);
-    };
-    const promptMissingKws = jdTerms
-      .filter(t => !resumeText.toLowerCase().includes(t.toLowerCase()) && !NON_TECH_JD_WORDS.has(t) && isLikelyTechTerm(t))
+    // Single canonical JD tech term extraction — reused for prompt injection targets,
+    // before/after scoring, and the missing-keywords display further below.
+    const jdTechTerms = extractJdTechTerms(jd);
+    const promptMissingKws = jdTechTerms
+      .filter(t => !resumeText.toLowerCase().includes(t.toLowerCase()))
       .slice(0, 15);
 
     const systemPrompt = `You are an ATS resume keyword injector. Inject missing JD keywords into bullets and tech stack lines ONLY.
@@ -391,46 +395,15 @@ ${jd}`;
       console.warn("Analysis parse failed:", e.message);
     }
 
-    // Deterministic scoring — extract genuine tech terms from JD
-    // Filter: must be >3 chars, not a common English word, look like a tech term
-    // Extract only genuine tech product/tool names from JD
-    // Strategy: keep short acronyms (EC2, EKS, MSK) and known tech patterns
-    // Reject generic English words even if capitalised
-    const GENERIC_WORDS = new Set([
-      "Main","Work","Tech","Stack","Cloud","Security","Services","More","Than","Years",
-      "Good","Have","Must","Should","Will","Also","Both","Such","Each","Please","About",
-      "Other","Their","These","Those","Some","Only","Just","Very","Most","Well","Even",
-      "Many","Much","Still","High","Best","Fast","Easy","Full","Free","Open","Next","Last",
-      "Team","Role","Time","Type","Data","Code","Test","User","File","Tool","Area","Page",
-      "List","Item","Base","Core","Mode","Path","Port","Task","Step","Flow","Call","Real",
-      "Live","Side","Back","Part","Used","Need","Help","Make","Give","Keep","Take","Know",
-      "Show","Find","Turn","Move","Come","Want","Like","Look","Into","Over","Then","When",
-      "Here","There","Where","From","This","That","With","Your","Been","They","Were","What",
-      "Which","While","After","Before","Since","Until","During","Within","Between","Against",
-      "Through","Around","Below","Under","Along","Across","Behind","Beyond","Inside","Outside",
-      "Responsibilities","Architect","Infrastructure","Engineers","Automations","Deployments",
-      "Provide","Required","Qualifications","Experience","Platform","Requirement","Ability",
-      "Demonstrate","Understanding","Building","Design","Manage","Ensure","Enable","Support",
-      "Delivery","Extensive","Technical","Excellent","Written","Verbal","Interpersonal",
-      "Demonstrated","Published","Relevant","Verifiable","Proficiency","Either","Language",
-      "Secret","Manager","Based","Regional","Failure","Tolerance","Industry","Standards",
-      "Compliance","Payment","Large","Scale","Distributed","Preferred","Bachelor","Degree",
-      "Related","Field","Optional","Required","Nice","Bilingual","English","Japanese"
-    ]);
-    const allJdTerms = [...new Set(
-      (jd.match(/\b[A-Z][a-zA-Z0-9]{1,}\b/g) || [])
-        .filter(t => {
-          if (t.length < 3 && !/^[A-Z0-9]{2,8}$/.test(t)) return false; // drop short non-acronym words like "We"
-          return !GENERIC_WORDS.has(t) && !NON_TECH_JD_WORDS.has(t) && isLikelyTechTerm(t);
-        })
-    )];
-    const beforeScore = keywordScore(resumeText, allJdTerms, []);
+    // Reuse the single canonical term list computed earlier — guarantees the score,
+    // the injection prompt, and the missing-keywords display never disagree.
+    const beforeScore = keywordScore(resumeText, jdTechTerms, []);
 
-    // Deterministic matched/missing — derived from allJdTerms, NOT from Gemini's analysis.
+    // Deterministic matched/missing — derived from jdTechTerms, NOT from Gemini's analysis.
     // Gemini's keyword lists vary run-to-run on the same JD; this does not.
     // Gemini's analysis is still used for qualitative text (recommendation, titleAlignment, missingContext).
-    const matchedKws = allJdTerms.filter(t => resumeText.toLowerCase().includes(t.toLowerCase()));
-    const missingKws = allJdTerms.filter(t => !resumeText.toLowerCase().includes(t.toLowerCase()));
+    const matchedKws = jdTechTerms.filter(t => resumeText.toLowerCase().includes(t.toLowerCase()));
+    const missingKws = jdTechTerms.filter(t => !resumeText.toLowerCase().includes(t.toLowerCase()));
 
     // Enforce per-line budgets — also enforce minimum (no truncation)
     const correctedContent = contentLines.map(({ line: origLine, meta }, i) => {
@@ -607,11 +580,11 @@ ${jd}`;
     const tailoredText = finalLines.join("\n");
     const tailoredWordCount = tailoredText.split(/\s+/).filter(Boolean).length;
     // Deterministic after score: same JD terms, now against tailored text
-    const afterScore = keywordScore(tailoredText, allJdTerms, []);
+    const afterScore = keywordScore(tailoredText, jdTechTerms, []);
 
-    // Deterministic after-tailoring missing list — which allJdTerms are STILL absent post-injection
-    const afterMissingKws = allJdTerms.filter(t => !tailoredText.toLowerCase().includes(t.toLowerCase()));
-    const afterMatchedKws = allJdTerms.filter(t => tailoredText.toLowerCase().includes(t.toLowerCase()));
+    // Deterministic after-tailoring missing list — which jdTechTerms are STILL absent post-injection
+    const afterMissingKws = jdTechTerms.filter(t => !tailoredText.toLowerCase().includes(t.toLowerCase()));
+    const afterMatchedKws = jdTechTerms.filter(t => tailoredText.toLowerCase().includes(t.toLowerCase()));
 
     if (analysis) {
       analysis.beforeScore = beforeScore;
