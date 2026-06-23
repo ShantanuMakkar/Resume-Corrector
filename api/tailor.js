@@ -411,22 +411,22 @@ ${jd}`;
       if (!tailLine.trim()) return origLine;
 
       // -1. Revert if a forbidden business/brand word was injected as a fake keyword
-      // Reject if a generic JD "soft language" word leaked in as a fake keyword
-      // These are adjectives/qualifiers from JD prose (e.g. "Strong understanding...",
-      // "Familiarity with...", "Demonstrated experience...") — never real skills
-      const SOFT_LANGUAGE_WORDS = ["strong", "good", "excellent", "demonstrated", "proactive",
-        "successful", "effective", "advantageous", "crucial", "highly", "familiarity",
-        "familiar", "knowledge", "understanding", "experience", "skills", "ability",
-        "expertise", "exposure", "hands-on", "extensive", "solid", "proven"];
+      // Reject any newly-added word that ISN'T in our canonical tech-terms list.
+      // This is more durable than maintaining a blocklist of JD prose words (strong,
+      // familiarity, troubleshoot, etc.) — it directly checks: was this word actually
+      // one of the keywords we told the AI to inject? If not, it's noise from JD prose.
       if (meta.isBullet || meta.isSkills || meta.isTechStack) {
         const origLowerCheck = origLine.toLowerCase();
         const tailLowerCheck = tailLine.toLowerCase();
-        const leakedWord = SOFT_LANGUAGE_WORDS.find(w => {
-          const re = new RegExp(`\\b${w}\\b`, "i");
-          return re.test(tailLowerCheck) && !re.test(origLowerCheck);
-        });
-        if (leakedWord) {
-          console.log(`[enforce] Line ${i+1} reverted: soft-language JD word "${leakedWord}" leaked as fake keyword`);
+        const origWordsCheck = new Set(origLowerCheck.split(/\W+/).filter(Boolean));
+        const tailWordsCheck = tailLowerCheck.split(/\W+/).filter(Boolean);
+        const newWords = tailWordsCheck.filter(w => w.length > 3 && !origWordsCheck.has(w));
+        const validTechWordsLower = new Set(jdTechTerms.map(t => t.toLowerCase()));
+        // Also allow words that are substrings of any valid tech term (handles "MSK" inside "AWS MSK" etc)
+        const isPartOfValidTerm = (w) => [...validTechWordsLower].some(t => t.includes(w) || w.includes(t));
+        const invalidNewWord = newWords.find(w => !validTechWordsLower.has(w) && !isPartOfValidTerm(w));
+        if (invalidNewWord) {
+          console.log(`[enforce] Line ${i+1} reverted: injected word "${invalidNewWord}" is not a recognized JD tech term`);
           return origLine;
         }
       }
