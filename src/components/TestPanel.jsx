@@ -71,7 +71,7 @@ export default function TestPanel({ resumeText, tailoredText, analysis, tailorSt
       lines.push(`Has About Us intro (stripped): ${hasAboutUs ? "YES" : "no"}`);
       // Extract capitalised terms from JD
       const jdTerms = [...new Set((jd.match(/\b[A-Z][a-zA-Z0-9]+\b/g)||[]).filter(t=>t.length>2))];
-      lines.push(`Technical terms in JD: ${jdTerms.slice(0,30).join(", ")}`);
+      lines.push(`Raw capitalized words in JD (unfiltered, for reference only — NOT what's used for matching): ${jdTerms.slice(0,20).join(", ")}`);
     }
 
     // ── 4. Tailoring results ──────────────────────────────────

@@ -209,7 +209,11 @@ const NON_TECH_JD_WORDS = new Set([
   "Promoting","Reuse","Effective","Patterns","Applies","Improve","Value","Realized","Set",
   "Expectations","Validating","Correctness","Coaching","Coach","Adherence","Resiliency",
   "Adoption","Consistent","Various","Multiple","Across","Entire","Lifecycle","Independently",
-  "Efficient","Solutions","Stakeholder"
+  "Efficient","Solutions","Stakeholder","Integration","Functional","Regulatory","E2E","Post",
+  "Checkouts","Development","Life","Needs","Cycle","Testing","Handover","Support","Validation",
+  "Certifying","Angles","Planning","Checkout","Requests","Urgency","Interface","Recurring",
+  "Issues","Overall","Outcomes","Engineering","Quality","Speed","Standards","Applicant",
+  "Change"
 ]);
 
 function extractJdTechTerms(jd) {
@@ -219,18 +223,36 @@ function extractJdTechTerms(jd) {
     wordFrequency[w] = (wordFrequency[w] || 0) + 1;
   });
 
+  // Find words that appear inside a "tool list" context — comma/slash-separated capitalized
+  // items following trigger phrases like "such as", "like", "including", "tools like", or
+  // inside parentheses "(e.g. X, Y, Z)". These contexts reliably signal real tool/tech names
+  // even for plain-English words that wouldn't otherwise look like tech (e.g. "Maven", "Jira").
+  const listContextWords = new Set();
+  const listTriggerPattern = /(?:such as|like|including|e\.g\.?,?|tools? like)\s*:?\s*([^.;]+)/gi;
+  let m;
+  while ((m = listTriggerPattern.exec(jd)) !== null) {
+    const segment = m[1];
+    (segment.match(/\b[A-Z][a-zA-Z0-9+#]*\b/g) || []).forEach(w => listContextWords.add(w));
+  }
+  // Also capture parenthetical lists: "(EC2, VPC, S3, ...)"
+  const parenPattern = /\(([^)]+)\)/g;
+  while ((m = parenPattern.exec(jd)) !== null) {
+    (m[1].match(/\b[A-Z][a-zA-Z0-9+#]*\b/g) || []).forEach(w => listContextWords.add(w));
+  }
+
   const isLikelyTechTerm = (t) => {
     if (/^[A-Z0-9]{2,8}$/.test(t)) return true; // acronyms always pass (EC2, KMS, VPC)
-    if ((wordFrequency[t] || 0) >= 3) return false; // frequent word = company/role name
+    if (listContextWords.has(t)) return true; // appeared in a tool-list context — trust it
+    if ((wordFrequency[t] || 0) >= 2) return false; // repeated word, not flagged by list-context = company/role name
     if (/[0-9]/.test(t)) return true; // contains digit (S3, EC2)
     if (/[A-Z].*[A-Z]/.test(t) && t.length > 4) return true; // CamelCase (CloudFormation)
-    return !NON_TECH_JD_WORDS.has(t);
+    return false; // plain capitalized word with no other signal — likely sentence-prose, not tech
   };
 
   return [...new Set(
-    (jd.match(/\b[A-Z][a-zA-Z0-9]*(?:\/[A-Z][a-zA-Z0-9]*)?\b/g) || [])
+    (jd.match(/\b[A-Z][a-zA-Z0-9]*(?:[\/+#][A-Z][a-zA-Z0-9]*)?\b/g) || [])
       .filter(t => {
-        if (t.length < 3 && !/^[A-Z0-9]{2,8}$/.test(t)) return false;
+        if (t.length < 2) return false;
         return !NON_TECH_JD_WORDS.has(t) && isLikelyTechTerm(t);
       })
   )];
