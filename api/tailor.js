@@ -51,7 +51,10 @@ function extractJDEssentials(jd) {
   const lines = jd.split("\n").map(l => l.trim()).filter(Boolean);
 
   // Section headers that signal useful content
-  const usefulHeaders = /requirements?|qualifications?|responsibilities|skills|experience|what you.ll|what we.re|technical|must have|nice to have|you will|you.ll|duties|expectations|role|position|about the role/i;
+  const usefulHeaders = /requirements?|qualifications?|responsibilities|^skills$|^experience$|what you.ll|what we.re|^technical/i;
+  // Patterns that only count as a header when the WHOLE line is short (a section title),
+  // not when they appear mid-sentence in prose (e.g. "...team, you will be part of...")
+  const usefulHeaderShortLine = /must have|nice to have|you will|you.ll|duties|expectations|^role$|^position$|about the role/i;
 
   // Lines/sections to skip
   const skipPatterns = /benefits|perks|salary|compensation|equity|bonus|vacation|pto|health insurance|dental|vision|401k|remote|hybrid|office|culture|diversity|inclusion|equal opportunity|eoe|eeo|background check|drug test|we offer|we provide|about us|about the company|who we are|our mission|our values|join us|why work|great place|flexible/i;
@@ -63,7 +66,7 @@ function extractJDEssentials(jd) {
   const usefulLines = [];
 
   for (const line of lines) {
-    if (usefulHeaders.test(line)) {
+    if (usefulHeaders.test(line) || (usefulHeaderShortLine.test(line) && line.length < 60)) {
       inUsefulSection = true;
       foundFirstUsefulHeader = true;
     }
@@ -75,6 +78,9 @@ function extractJDEssentials(jd) {
     if (/^\$|salary range|compensation range|\bpto\b|paid time off|medical dental vision/i.test(line)) continue;
     // Skip company intro lines before first useful section
     if (!foundFirstUsefulHeader && /^about|^who we|^our mission|^we are|^we.re/i.test(line)) continue;
+    // Skip role/company announcement lines anywhere — "As a X at Company..." "We have an exciting opportunity..."
+    // These name the employer/title but carry no technical content
+    if (/^(as a|as an|we have an?|this is an?|join us as)\b/i.test(line)) continue;
     if (inUsefulSection) usefulLines.push(line);
   }
 
@@ -196,7 +202,14 @@ const NON_TECH_JD_WORDS = new Set([
   "System","Systems","Project","Projects","Department","Division","Group","Market",
   "Global","Consultant","Finance","Perform","Implement","Automate","Strong","Familiarity",
   "Familiar","Knowledge","Hands","Solid","Proven","Routine","Amazon","We","You","Our",
-  "Their","His","Her","Its"
+  "Their","His","Her","Its","Job","Drive","Identify","Process","Improvements","Release",
+  "Implementation","Comprehensive","Advanced","Applicant","Validation","Own","Act","Able",
+  "Identifies","Eliminate","Operational","Stability","Applications","Stress","Production",
+  "Develop","Working","Improving","Driving","Identifying","Drives","Adoption","Establishing",
+  "Promoting","Reuse","Effective","Patterns","Applies","Improve","Value","Realized","Set",
+  "Expectations","Validating","Correctness","Coaching","Coach","Adherence","Resiliency",
+  "Adoption","Consistent","Various","Multiple","Across","Entire","Lifecycle","Independently",
+  "Efficient","Solutions","Stakeholder"
 ]);
 
 function extractJdTechTerms(jd) {
